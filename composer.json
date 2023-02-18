@@ -1,0 +1,26 @@
+{
+	"name": "peroks/model-store",
+	"type": "library",
+	"description": "Model store: Persistent model data store",
+	"minimum-stability": "stable",
+	"version": "0.9.0",
+	"license": "MIT",
+	"authors": [
+		{
+			"name": "Per Egil Roksvaag",
+			"homepage": "https://github.com/peroks"
+		}
+	],
+	"require": {
+		"peroks/model": "^0.9",
+		"php": "^7.3 || ^8.0"
+	},
+	"require-dev": {
+		"phpunit/phpunit": "^9"
+	},
+	"autoload": {
+		"psr-4": {
+			"Peroks\\Model\\Store\\": "src/"
+		}
+	}
+}
