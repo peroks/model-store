@@ -1291,7 +1291,7 @@ class PdoStore implements StoreInterface {
 	 * @param ModelInterface|string $parent The parent model class name.
 	 * @param ModelInterface|string $child The child model class name.
 	 * @param string $id The property id containing the child models.
-	 * @param string|int $value The parent model id.
+	 * @param mixed $value The parent model id.
 	 *
 	 * @return string A query for selecting child models.
 	 */
@@ -1302,10 +1302,16 @@ class PdoStore implements StoreInterface {
 		$name    = $this->name( $table );
 		$source  = $this->name( $this->getTableName( $child ) );
 		$primary = $this->name( $child::idProperty() );
-		$value   = isset( $value ) ? $this->escape( $value ) : '?';
 
-		$sql[] = "SELECT C.* FROM {$source} as C JOIN {$name} as R";
-		$sql[] = "WHERE R.parent = {$value} AND R.child = C.{$primary}";
+		if ( isset( $value ) ) {
+			$func  = fn( $item ) => isset( $item ) ? $this->escape( $item ) : '?';
+			$value = join( ', ', array_map( $func, (array) $value ) );
+		} else {
+			$value = '?';
+		}
+
+		$sql[] = "SELECT R.parent, C.* FROM {$name} as R JOIN {$source} as C";
+		$sql[] = "ON R.`child` = C.{$primary} WHERE R.`parent` IN( {$value} )";
 
 		return join( ' ', $sql );
 	}
@@ -1882,7 +1888,59 @@ class PdoStore implements StoreInterface {
 	 * @return array An array of completely restored models.
 	 */
 	protected function restoreMulti( string $class, array $models ): array {
-		array_walk( $models, [ $this, 'restoreSingle' ] );
+		if ( empty( $models ) ) {
+			return $models;
+		}
+
+		if ( empty( $properties = static::getForeignProperties( $class::properties() ) ) ) {
+			return $models;
+		}
+
+		// Model ids.
+		$index = array_column( $models, null, $class::idProperty() );
+		$ids   = array_keys( $index );
+
+		// Recursively restore sub-models later.
+		$children = [];
+
+		// Loop over sub-model properties.
+		foreach ( $properties as $id => $property ) {
+			$type    = $property[ PropertyItem::TYPE ];
+			$child   = $property[ PropertyItem::MODEL ];
+			$primary = $child::idProperty();
+
+			if ( PropertyType::ARRAY === $type ) {
+				$dummy = array_fill( 0, count( $ids ), null );
+				$query = $this->selectChildrenQuery( $class, $child, $id, $dummy );
+
+				foreach ( $this->query( $query, $ids ) as $row ) {
+					$model = $index[ $row['parent'] ];
+					$sub   = $model[ $id ][] = $children[ $child ][] = new $child( $row );
+				}
+			} elseif ( PropertyType::OBJECT === $type ) {
+				$values = array_column( $models, $id );
+				$values = array_values( array_filter( $values ) );
+
+				if ( empty( $values ) ) {
+					continue;
+				}
+
+				$query = $this->listRowsStatement( $child, $values );
+				$group = Utils::group( $models, $id );
+
+				foreach ( $this->select( $query ) as $row ) {
+					foreach ( $group[ $row[ $primary ] ] as $model ) {
+						$model[ $id ] = $children[ $child ][] = new $child( $row );
+					}
+				}
+			}
+		}
+
+		// Recursively restore sub-models.
+		foreach ( $children as $child => $collection ) {
+			static::restoreMulti( $child, $collection );
+		}
+
 		return $models;
 	}
 

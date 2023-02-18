@@ -32,7 +32,6 @@ class MysqlStore extends PdoStore implements StoreInterface {
 	 * @return bool True on success, null on failure to create a connection.
 	 */
 	protected function connect( object $connect ): bool {
-
 		mysqli_report( MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT );
 
 		// Delete database.
@@ -226,8 +225,9 @@ class MysqlStore extends PdoStore implements StoreInterface {
 	 * @param ModelInterface[]|array[] $models An array of models of the given class.
 	 *
 	 * @return array An array of completely restored models.
+	 * @ignore Alternative to restoreMulti()
 	 */
-	protected function restoreMulti( string $class, array $models ): array {
+	protected function altRestoreMulti( string $class, array $models ): array {
 		if ( empty( $models ) ) {
 			return $models;
 		}
