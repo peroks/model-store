@@ -124,6 +124,33 @@ class MysqlStore extends PdoStore implements StoreInterface {
 	}
 
 	/**
+	 * Initiates a transaction.
+	 *
+	 * @return bool True on success or false on failure.
+	 */
+	protected function beginTransaction(): bool {
+		return $this->db->begin_transaction();
+	}
+
+	/**
+	 * Commits a transaction.
+	 *
+	 * @return bool True on success or false on failure.
+	 */
+	protected function commit(): bool {
+		return $this->db->commit();
+	}
+
+	/**
+	 * Rolls back a transaction.
+	 *
+	 * @return bool True on success or false on failure.
+	 */
+	protected function rollBack(): bool {
+		return $this->db->rollBack();
+	}
+
+	/**
 	 * Quotes db, table, column and index names.
 	 *
 	 * @param string $name The name to quote.
@@ -266,7 +293,7 @@ class MysqlStore extends PdoStore implements StoreInterface {
 				$target = array_shift( $targets );
 
 				while ( $row = $this->fetch( $result ) ) {
-					$children[ $target->child ][] = $child = new $target->child( $row );
+					$child = $children[ $target->child ][] = new $target->child( $row );
 
 					// Assign sub-models to the parent model.
 					if ( PropertyType::OBJECT === $target->type ) {

@@ -6,6 +6,7 @@ use Peroks\Model\ModelInterface;
 use Peroks\Model\Property;
 use Peroks\Model\PropertyItem;
 use Peroks\Model\PropertyType;
+use Throwable;
 
 /**
  * Class for storing and retrieving models from a SQL database.
@@ -148,6 +149,33 @@ class PdoStore implements StoreInterface {
 	}
 
 	/**
+	 * Initiates a transaction.
+	 *
+	 * @return bool True on success or false on failure.
+	 */
+	protected function beginTransaction(): bool {
+		return $this->db->beginTransaction();
+	}
+
+	/**
+	 * Commits a transaction.
+	 *
+	 * @return bool True on success or false on failure.
+	 */
+	protected function commit(): bool {
+		return $this->db->commit();
+	}
+
+	/**
+	 * Rolls back a transaction.
+	 *
+	 * @return bool True on success or false on failure.
+	 */
+	protected function rollBack(): bool {
+		return $this->db->rollBack();
+	}
+
+	/**
 	 * Quotes db, table, column and index names.
 	 *
 	 * @param string $name The name to quote.
@@ -273,7 +301,37 @@ class PdoStore implements StoreInterface {
 	 */
 	public function set( ModelInterface $model ): ModelInterface {
 		$model->validate( true );
+		$this->beginTransaction();
 
+		$class = get_class( $model );
+		$query = $this->exists( $class, $model->id() )
+			? $this->updateRowStatement( $class )
+			: $this->insertRowStatement( $class );
+
+		try {
+			$values = $this->getModelValues( $model );
+			$rows   = $this->update( $query, $values );
+
+			$this->updateRelations( $model );
+			$this->commit();
+		} catch ( Throwable $e ) {
+			$this->rollBack();
+			throw $e;
+		}
+
+		return $model;
+	}
+
+	/**
+	 * Internally saves and validates a model in the data store.
+	 *
+	 * Same as external set(), but without model validation and transactions.
+	 *
+	 * @param ModelInterface $model The model to store.
+	 *
+	 * @return ModelInterface The stored model.
+	 */
+	protected function setInternal( ModelInterface $model ): ModelInterface {
 		$class = get_class( $model );
 		$query = $this->exists( $class, $model->id() )
 			? $this->updateRowStatement( $class )
@@ -294,9 +352,18 @@ class PdoStore implements StoreInterface {
 	 * @return bool True if the model existed, false otherwise.
 	 */
 	public function delete( string $class, string $id ): bool {
-		$query  = $this->deleteRowStatement( $class );
-		$result = $this->update( $query, [ $id ] );
-		return (bool) $result;
+		$this->beginTransaction();
+
+		try {
+			$query  = $this->deleteRowStatement( $class );
+			$result = $this->update( $query, [ $id ] );
+
+			$this->commit();
+			return (bool) $result;
+		} catch ( Throwable $e ) {
+			$this->rollBack();
+			throw $e;
+		}
 	}
 
 	/* -------------------------------------------------------------------------
@@ -1394,7 +1461,7 @@ class PdoStore implements StoreInterface {
 		$relation = $this->getRelationName( get_class( $parent ), $id );
 		$table    = $this->getTableName( $relation );
 
-		$list = array_map( [ $this, 'set' ], $parent[ $id ] ?? [] );
+		$list = array_map( [ $this, 'setInternal' ], $parent[ $id ] ?? [] );
 		$list = array_column( $list, null, $child::idProperty() );
 
 		$select   = $this->selectRelationStatement( $table );
@@ -1800,7 +1867,7 @@ class PdoStore implements StoreInterface {
 		if ( PropertyType::OBJECT === $type ) {
 			if ( Utils::isModel( $child ) ) {
 				if ( $child::idProperty() ) {
-					return $this->set( $value )->id();
+					return $this->setInternal( $value )->id();
 				}
 				return Utils::encode( $value->data( ModelData::COMPACT ) );
 			}
