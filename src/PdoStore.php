@@ -573,6 +573,12 @@ class PdoStore implements StoreInterface {
 	protected function alterTableQuery( string $class ): string {
 		$columns = $this->calcDeltaColumns( $class );
 		$indexes = $this->calcDeltaIndexes( $class );
+		$foreign = $this->calcDeltaForeign( $class );
+
+		// Drop foreign keys.
+		foreach ( array_keys( $foreign['drop'] ) as $name ) {
+			$sql[] = sprintf( 'DROP FOREIGN KEY %s', $this->name( $name ) );
+		}
 
 		// Drop indexes.
 		foreach ( array_keys( $indexes['drop'] ) as $name ) {
@@ -1235,7 +1241,7 @@ class PdoStore implements StoreInterface {
 	 * @return string A pseudo-class name for the relation.
 	 */
 	protected function getRelationName( string $class, string $id ): string {
-		return $class . '\\' . $id;
+		return $class . '\\_' . $id;
 	}
 
 	/**
@@ -1297,40 +1303,44 @@ class PdoStore implements StoreInterface {
 			return false;
 		}
 
-		// Foreign key names.
-		$parentForeign = $this->getTableName( $relation . '\\parent' );
-		$childForeign  = $this->getTableName( $relation . '\\child' );
+		// Column names.
+		$parentColumn = '_parent';
+		$childColumn  = '_child';
 
-		$columns['parent'] = [
-			'name'     => 'parent',
+		// Foreign key names.
+		$parentForeign = $this->getTableName( $relation . '\\' . $parentColumn );
+		$childForeign  = $this->getTableName( $relation . '\\' . $childColumn );
+
+		$columns[ $parentColumn ] = [
+			'name'     => $parentColumn,
 			'type'     => $this->getColumnType( $parentPrimary ),
 			'required' => true,
 			'default'  => null,
 		];
 
-		$columns['child'] = [
-			'name'     => 'child',
+		$columns[ $childColumn ] = [
+			'name'     => $childColumn,
 			'type'     => $this->getColumnType( $childPrimary ),
 			'required' => true,
 			'default'  => null,
 		];
 
-		$indexes['parent'] = [
-			'name'    => 'parent',
+		$indexes[ $parentColumn ] = [
+			'name'    => $parentColumn,
 			'type'    => 'INDEX',
-			'columns' => [ 'parent' ],
+			'columns' => [ $parentColumn ],
 		];
 
-		$indexes['child'] = [
-			'name'    => 'child',
+		$indexes[ $childColumn ] = [
+			'name'    => $childColumn,
 			'type'    => 'INDEX',
-			'columns' => [ 'child' ],
+			'columns' => [ $childColumn ],
 		];
 
 		$foreign[ $parentForeign ] = [
 			'name'    => $parentForeign,
 			'type'    => 'FOREIGN',
-			'columns' => [ 'parent' ],
+			'columns' => [ $parentColumn ],
 			'table'   => $this->getTableName( $parent ),
 			'fields'  => [ $parent::idProperty() ],
 			'update'  => 'CASCADE',
@@ -1340,7 +1350,7 @@ class PdoStore implements StoreInterface {
 		$foreign[ $childForeign ] = [
 			'name'    => $childForeign,
 			'type'    => 'FOREIGN',
-			'columns' => [ 'child' ],
+			'columns' => [ $childColumn ],
 			'table'   => $this->getTableName( $child ),
 			'fields'  => [ $child::idProperty() ],
 			'update'  => 'CASCADE',
@@ -1380,8 +1390,8 @@ class PdoStore implements StoreInterface {
 			$value = '?';
 		}
 
-		$sql[] = "SELECT R.parent, C.* FROM {$name} as R JOIN {$source} as C";
-		$sql[] = "ON R.`child` = C.{$primary} WHERE R.`parent` IN( {$value} )";
+		$sql[] = "SELECT R._parent, C.* FROM {$name} as R JOIN {$source} as C";
+		$sql[] = "ON R._child = C.{$primary} WHERE R._parent IN( {$value} )";
 
 		return join( ' ', $sql );
 	}
@@ -1410,13 +1420,12 @@ class PdoStore implements StoreInterface {
 	 * Gets a prepared query for selecting rows from the given relation table.
 	 *
 	 * @param string $table The relation table name.
-	 * @param string $column The column name: 'parent' or 'child'.
 	 *
 	 * @return PDOStatement|object A prepared query object.
 	 */
-	protected function selectRelationStatement( string $table, string $column = 'parent' ): object {
+	protected function selectRelationStatement( string $table ): object {
 		if ( empty( $this->queries[ $table ]['select'] ) ) {
-			$query = $this->selectRowQuery( $table, $column );;
+			$query = $this->selectRowQuery( $table, '_parent' );;
 			$this->queries[ $table ]['select'] = $this->prepare( $query );
 		}
 		return $this->queries[ $table ]['select'];
@@ -1426,13 +1435,12 @@ class PdoStore implements StoreInterface {
 	 * Gets a prepared query for deleting rows from the given relation table.
 	 *
 	 * @param string $table The relation table name.
-	 * @param string $column The column name: 'parent' or 'child'.
 	 *
 	 * @return PDOStatement|object A prepared query object.
 	 */
-	protected function deleteRelationStatement( string $table, string $column = 'parent' ): object {
+	protected function deleteRelationStatement( string $table ): object {
 		if ( empty( $this->queries[ $table ]['delete'] ) ) {
-			$query = $this->deleteRowQuery( $table, $column );;
+			$query = $this->deleteRowQuery( $table, '_parent' );;
 			$this->queries[ $table ]['delete'] = $this->prepare( $query );
 		}
 		return $this->queries[ $table ]['delete'];
@@ -1984,7 +1992,7 @@ class PdoStore implements StoreInterface {
 				$query = $this->selectChildrenQuery( $class, $child, $id, $dummy );
 
 				foreach ( $this->query( $query, $ids ) as $row ) {
-					$model = $index[ $row['parent'] ];
+					$model = $index[ $row['_parent'] ];
 					$sub   = $model[ $id ][] = $children[ $child ][] = new $child( $row );
 				}
 			} elseif ( PropertyType::OBJECT === $type ) {
