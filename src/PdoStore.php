@@ -303,16 +303,8 @@ class PdoStore implements StoreInterface {
 		$model->validate( true );
 		$this->beginTransaction();
 
-		$class = get_class( $model );
-		$query = $this->exists( $class, $model->id() )
-			? $this->updateRowStatement( $class )
-			: $this->insertRowStatement( $class );
-
 		try {
-			$values = $this->getModelValues( $model );
-			$rows   = $this->update( $query, $values );
-
-			$this->updateRelations( $model );
+			$this->setInternal( $model );
 			$this->commit();
 		} catch ( Throwable $e ) {
 			$this->rollBack();
@@ -355,15 +347,26 @@ class PdoStore implements StoreInterface {
 		$this->beginTransaction();
 
 		try {
-			$query  = $this->deleteRowStatement( $class );
-			$result = $this->update( $query, [ $id ] );
-
+			$result = $this->deleteInternal( $class, $id );
 			$this->commit();
-			return (bool) $result;
+			return $result;
 		} catch ( Throwable $e ) {
 			$this->rollBack();
 			throw $e;
 		}
+	}
+
+	/**
+	 * Deletes a model from the data store.
+	 *
+	 * @param ModelInterface|string $class The model class name.
+	 * @param string $id The model id.
+	 *
+	 * @return bool True if the model existed, false otherwise.
+	 */
+	protected function deleteInternal( string $class, string $id ): bool {
+		$query = $this->deleteRowStatement( $class );
+		return (bool) $this->update( $query, [ $id ] );
 	}
 
 	/* -------------------------------------------------------------------------
