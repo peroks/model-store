@@ -459,6 +459,11 @@ class PdoStore implements StoreInterface {
 	protected function buildDatabase( array $classes ): int {
 		$count = 0;
 
+		// Remove surplus foreign keys.
+		foreach ( $classes as $name ) {
+			$count += $this->alterForeign( $name, false );
+		}
+
 		// Create or alter model tables (columns + indexes).
 		foreach ( $classes as $name ) {
 			$count += $this->createTable( $name ) ?: $this->alterTable( $name );
@@ -573,12 +578,6 @@ class PdoStore implements StoreInterface {
 	protected function alterTableQuery( string $class ): string {
 		$columns = $this->calcDeltaColumns( $class );
 		$indexes = $this->calcDeltaIndexes( $class );
-		$foreign = $this->calcDeltaForeign( $class );
-
-		// Drop foreign keys.
-		foreach ( array_keys( $foreign['drop'] ) as $name ) {
-			$sql[] = sprintf( 'DROP FOREIGN KEY %s', $this->name( $name ) );
-		}
 
 		// Drop indexes.
 		foreach ( array_keys( $indexes['drop'] ) as $name ) {
@@ -1074,13 +1073,13 @@ class PdoStore implements StoreInterface {
 		if ( isset( $drop ) ) {
 			$drop  = "\n" . join( ",\n", $drop );
 			$table = $this->name( $this->getTableName( $class ) );
-			$sql[] = sprintf( 'ALTER TABLE %s %s', $table, $drop );
+			$query = $sql['drop'] = sprintf( 'ALTER TABLE %s %s', $table, $drop );
 		}
 
 		if ( isset( $create ) ) {
 			$create = "\n" . join( ",\n", $create );
 			$table  = $this->name( $this->getTableName( $class ) );
-			$sql[]  = sprintf( 'ALTER TABLE %s %s', $table, $create );
+			$query  = $sql['create'] = sprintf( 'ALTER TABLE %s %s', $table, $create );
 		}
 
 		return $sql ?? [];
@@ -1093,11 +1092,13 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @return bool True if any foreign keys were altered, false otherwise..
 	 */
-	protected function alterForeign( string $class ): bool {
+	protected function alterForeign( string $class, $create = true ): bool {
 		$count = 0;
 
-		foreach ( $this->alterForeignQuery( $class ) as $query ) {
-			$count += $this->exec( $query );
+		foreach ( $this->alterForeignQuery( $class ) as $type => $query ) {
+			if ( $create || 'create' !== $type ) {
+				$count += $this->exec( $query );
+			}
 		}
 
 		return (bool) $count;
@@ -1410,8 +1411,8 @@ class PdoStore implements StoreInterface {
 		$table    = $this->getTableName( $relation );
 
 		if ( empty( $this->queries[ $table ]['children'] ) ) {
-			$query = $this->selectChildrenQuery( $parent, $child, $id );;
-			$this->queries[ $table ]['children'] = $this->prepare( $query );
+			$query = $this->selectChildrenQuery( $parent, $child, $id );
+			return $this->queries[ $table ]['children'] = $this->prepare( $query );
 		}
 		return $this->queries[ $table ]['children'];
 	}
@@ -1425,8 +1426,8 @@ class PdoStore implements StoreInterface {
 	 */
 	protected function selectRelationStatement( string $table ): object {
 		if ( empty( $this->queries[ $table ]['select'] ) ) {
-			$query = $this->selectRowQuery( $table, '_parent' );;
-			$this->queries[ $table ]['select'] = $this->prepare( $query );
+			$query = $this->selectRowQuery( $table, '_parent' );
+			return $this->queries[ $table ]['select'] = $this->prepare( $query );
 		}
 		return $this->queries[ $table ]['select'];
 	}
@@ -1440,8 +1441,8 @@ class PdoStore implements StoreInterface {
 	 */
 	protected function deleteRelationStatement( string $table ): object {
 		if ( empty( $this->queries[ $table ]['delete'] ) ) {
-			$query = $this->deleteRowQuery( $table, '_parent' );;
-			$this->queries[ $table ]['delete'] = $this->prepare( $query );
+			$query = $this->deleteRowQuery( $table, '_parent' );
+			return $this->queries[ $table ]['delete'] = $this->prepare( $query );
 		}
 		return $this->queries[ $table ]['delete'];
 	}
@@ -1455,8 +1456,8 @@ class PdoStore implements StoreInterface {
 	 */
 	protected function insertRelationStatement( string $table ): object {
 		if ( empty( $this->queries[ $table ]['insert'] ) ) {
-			$query = sprintf( 'INSERT INTO %s VALUES (?, ?)', $this->name( $table ) );;
-			$this->queries[ $table ]['insert'] = $this->prepare( $query );
+			$query = sprintf( 'INSERT INTO %s VALUES (?, ?)', $this->name( $table ) );
+			return $this->queries[ $table ]['insert'] = $this->prepare( $query );
 		}
 		return $this->queries[ $table ]['insert'];
 	}
@@ -1548,8 +1549,8 @@ class PdoStore implements StoreInterface {
 		$table = $this->getTableName( $class );
 
 		if ( empty( $this->queries[ $table ]['exists'] ) ) {
-			$query = $this->existsRowQuery( $table, $class::idProperty() );;
-			$this->queries[ $table ]['exists'] = $this->prepare( $query );
+			$query = $this->existsRowQuery( $table, $class::idProperty() );
+			return $this->queries[ $table ]['exists'] = $this->prepare( $query );
 		}
 		return $this->queries[ $table ]['exists'];
 	}
@@ -1583,8 +1584,8 @@ class PdoStore implements StoreInterface {
 
 		if ( empty( $this->queries[ $table ]['select'] ) ) {
 			$primary = $class::idProperty();
-			$query   = $this->selectRowQuery( $table, $primary );;
-			$this->queries[ $table ]['select'] = $this->prepare( $query );
+			$query   = $this->selectRowQuery( $table, $primary );
+			return $this->queries[ $table ]['select'] = $this->prepare( $query );
 		}
 		return $this->queries[ $table ]['select'];
 	}
@@ -1604,7 +1605,7 @@ class PdoStore implements StoreInterface {
 
 		foreach ( $values as &$value ) {
 			$value = isset( $value ) ? $this->escape( $value ) : '?';
-		};
+		}
 
 		$values = join( ', ', $values );
 		return "SELECT * FROM {$table} WHERE {$primary} IN ({$values})";
@@ -1682,8 +1683,8 @@ class PdoStore implements StoreInterface {
 		$table = $this->getTableName( $class );
 
 		if ( empty( $this->queries[ $table ]['all'] ) ) {
-			$query = $this->allRowsQuery( $table );;
-			$this->queries[ $table ]['all'] = $this->prepare( $query );
+			$query = $this->allRowsQuery( $table );
+			return $this->queries[ $table ]['all'] = $this->prepare( $query );
 		}
 		return $this->queries[ $table ]['all'];
 	}
@@ -1727,8 +1728,8 @@ class PdoStore implements StoreInterface {
 
 		if ( empty( $this->queries[ $table ]['insert'] ) ) {
 			$properties = $class::properties();
-			$query      = $this->insertRowQuery( $table, $properties );;
-			$this->queries[ $table ]['insert'] = $this->prepare( $query );
+			$query      = $this->insertRowQuery( $table, $properties );
+			return $this->queries[ $table ]['insert'] = $this->prepare( $query );
 		}
 		return $this->queries[ $table ]['insert'];
 	}
@@ -1779,8 +1780,7 @@ class PdoStore implements StoreInterface {
 			$properties = $class::properties();
 			$primary    = $class::idProperty();
 			$query      = $this->updateRowQuery( $table, $properties, $primary );
-
-			$this->queries[ $table ]['update'] = $this->prepare( $query );
+			return $this->queries[ $table ]['update'] = $this->prepare( $query );
 		}
 		return $this->queries[ $table ]['update'];
 	}
@@ -1814,8 +1814,8 @@ class PdoStore implements StoreInterface {
 
 		if ( empty( $this->queries[ $table ]['delete'] ) ) {
 			$primary = $class::idProperty();
-			$query   = $this->deleteRowQuery( $table, $primary );;
-			$this->queries[ $table ]['delete'] = $this->prepare( $query );
+			$query   = $this->deleteRowQuery( $table, $primary );
+			return $this->queries[ $table ]['delete'] = $this->prepare( $query );
 		}
 		return $this->queries[ $table ]['delete'];
 	}
