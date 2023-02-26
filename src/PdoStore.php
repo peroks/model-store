@@ -1307,6 +1307,7 @@ class PdoStore implements StoreInterface {
 		// Column names.
 		$parentColumn = '_parent';
 		$childColumn  = '_child';
+		$orderColumn  = '_order';
 
 		// Foreign key names.
 		$parentForeign = $this->getTableName( $relation . '\\' . $parentColumn );
@@ -1316,13 +1317,18 @@ class PdoStore implements StoreInterface {
 			'name'     => $parentColumn,
 			'type'     => $this->getColumnType( $parentPrimary ),
 			'required' => true,
-			'default'  => null,
 		];
 
 		$columns[ $childColumn ] = [
 			'name'     => $childColumn,
 			'type'     => $this->getColumnType( $childPrimary ),
 			'required' => true,
+		];
+
+		$columns[ $orderColumn ] = [
+			'name'     => $orderColumn,
+			'type'     => 'bigint(20)',
+			'required' => false,
 			'default'  => null,
 		];
 
@@ -1393,6 +1399,7 @@ class PdoStore implements StoreInterface {
 
 		$sql[] = "SELECT R._parent, C.* FROM {$name} as R JOIN {$source} as C";
 		$sql[] = "ON R._child = C.{$primary} WHERE R._parent IN( {$value} )";
+		$sql[] = "ORDER BY R._order ASC";
 
 		return join( ' ', $sql );
 	}
@@ -1418,6 +1425,23 @@ class PdoStore implements StoreInterface {
 	}
 
 	/**
+	 * Generates a query for selecting rows from the given relation table.
+	 *
+	 * @param string $table The table name.
+	 * @param string|int|null $value The parent id to select.
+	 *
+	 * @return string A query for selecting relation rows.
+	 */
+	protected function selectRelationQuery( string $table, $value = null ): string {
+		return vsprintf( 'SELECT * FROM %s WHERE %s = %s ORDER BY %s ASC', [
+			$this->name( $table ),
+			$this->name( '_parent' ),
+			isset( $value ) ? $this->escape( $value ) : '?',
+			$this->name( '_order' ),
+		] );
+	}
+
+	/**
 	 * Gets a prepared query for selecting rows from the given relation table.
 	 *
 	 * @param string $table The relation table name.
@@ -1426,7 +1450,7 @@ class PdoStore implements StoreInterface {
 	 */
 	protected function selectRelationStatement( string $table ): object {
 		if ( empty( $this->queries[ $table ]['select'] ) ) {
-			$query = $this->selectRowQuery( $table, '_parent' );
+			$query = $this->selectRelationQuery( $table );
 			return $this->queries[ $table ]['select'] = $this->prepare( $query );
 		}
 		return $this->queries[ $table ]['select'];
@@ -1456,7 +1480,7 @@ class PdoStore implements StoreInterface {
 	 */
 	protected function insertRelationStatement( string $table ): object {
 		if ( empty( $this->queries[ $table ]['insert'] ) ) {
-			$query = sprintf( 'INSERT INTO %s VALUES (?, ?)', $this->name( $table ) );
+			$query = sprintf( 'INSERT INTO %s VALUES (?, ?, ?)', $this->name( $table ) );
 			return $this->queries[ $table ]['insert'] = $this->prepare( $query );
 		}
 		return $this->queries[ $table ]['insert'];
@@ -1466,35 +1490,29 @@ class PdoStore implements StoreInterface {
 	 * Updates a relation between parent and child models.
 	 *
 	 * @param ModelInterface $parent The parent model instance.
-	 * @param ModelInterface|string $child The child model class name.
 	 * @param string $id The property id containing the child models.
 	 */
-	protected function updateRelation( ModelInterface $parent, string $child, string $id ): void {
+	protected function updateRelation( ModelInterface $parent, string $id ): void {
 		$relation = $this->getRelationName( get_class( $parent ), $id );
 		$table    = $this->getTableName( $relation );
+		$children = array_map( [ $this, 'setInternal' ], $parent[ $id ] ?? [] );
 
-		$list = array_map( [ $this, 'setInternal' ], $parent[ $id ] ?? [] );
-		$list = array_column( $list, null, $child::idProperty() );
+		$select = $this->selectRelationStatement( $table );
+		$stored = $this->select( $select, [ $parent->id() ] );
+		$stored = array_map( 'array_values', $stored );
+		$rows   = [];
 
-		$select   = $this->selectRelationStatement( $table );
-		$existing = $this->select( $select, [ $parent->id() ] );
-		$existing = array_column( $existing, null, $parent::idProperty() );
-		$common   = array_intersect_key( $list, $existing );
+		foreach ( $children as $order => $child ) {
+			$rows[] = [ $parent->id(), $child->id(), $order ];
+		}
 
-		if ( count( $common ) < count( $existing ) ) {
+		if ( $stored !== $rows ) {
 			$delete = $this->deleteRelationStatement( $table );
 			$insert = $this->insertRelationStatement( $table );
-			$rows   = $this->update( $delete, [ $parent->id() ] );
+			$count  = $this->update( $delete, [ $parent->id() ] );
 
-			foreach ( $list as $item ) {
-				$rows = $this->update( $insert, [ $parent->id(), $item->id() ] );
-			}
-		} elseif ( count( $common ) < count( $list ) ) {
-			$insert = $this->insertRelationStatement( $table );
-			$added  = array_diff_key( $list, $existing );
-
-			foreach ( $added as $item ) {
-				$rows = $this->update( $insert, [ $parent->id(), $item->id() ] );
+			foreach ( $rows as $values ) {
+				$count = $this->update( $insert, $values );
 			}
 		}
 	}
@@ -1509,9 +1527,8 @@ class PdoStore implements StoreInterface {
 	protected function updateRelations( ModelInterface $model ): ModelInterface {
 		$relations = static::getRelationProperties( $model::properties() );
 
-		foreach ( $relations as $id => $property ) {
-			$child = $property[ PropertyItem::MODEL ];
-			$this->updateRelation( $model, $child, $id );
+		foreach ( array_keys( $relations ) as $id ) {
+			$this->updateRelation( $model, $id );
 		}
 
 		return $model;
