@@ -28,31 +28,17 @@ class Utils extends \Peroks\Model\Utils {
 			return false;
 		}
 
+		// The reference is stored in the foreign model.
+		if ( isset( $property[ PropertyItem::MATCH ] ) ) {
+			return false;
+		}
+
 		// Relations are stored in a separate relation table.
 		if ( static::isRelation( $property ) ) {
 			return false;
 		}
 
 		return true;
-	}
-
-	/**
-	 * Checks if a model property needs a foreign key.
-	 *
-	 * @param Property|array $property The property.
-	 *
-	 * @return bool
-	 */
-	public static function needsForeignKey( $property ): bool {
-		$model   = $property[ PropertyItem::MODEL ] ?? null;
-		$foreign = $property[ PropertyItem::FOREIGN ] ?? $model;
-
-		if ( static::isModel( $foreign ) && $foreign::idProperty() ) {
-			$type = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
-			return PropertyType::ARRAY !== $type;
-		}
-
-		return false;
 	}
 
 	/**
@@ -63,14 +49,38 @@ class Utils extends \Peroks\Model\Utils {
 	 * @return bool
 	 */
 	public static function isRelation( $property ): bool {
-		$type  = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
-		$model = $property[ PropertyItem::MODEL ] ?? null;
+		$type = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
 
-		if ( PropertyType::ARRAY === $type ) {
+		if ( PropertyType::ARRAY === $type && empty( $property[ PropertyItem::MATCH ] ) ) {
+			$model = $property[ PropertyItem::MODEL ] ?? null;
+
 			if ( static::isModel( $model ) && $model::idProperty() ) {
 				return true;
 			}
 		}
+
+		return false;
+	}
+
+	/**
+	 * Checks if a model property needs a foreign key.
+	 *
+	 * @param Property|array $property The property.
+	 *
+	 * @return bool
+	 */
+	public static function needsForeignKey( $property ): bool {
+		$type = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
+
+		if ( PropertyType::ARRAY !== $type && empty( $property[ PropertyItem::MATCH ] ) ) {
+			$model   = $property[ PropertyItem::MODEL ] ?? null;
+			$foreign = $property[ PropertyItem::FOREIGN ] ?? $model;
+
+			if ( static::isModel( $foreign ) && $foreign::idProperty() ) {
+				return true;
+			}
+		}
+
 		return false;
 	}
 }

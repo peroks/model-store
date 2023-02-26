@@ -1906,11 +1906,13 @@ class PdoStore implements StoreInterface {
 	 */
 	protected static function getForeignProperties( array $properties ): array {
 		return array_filter( $properties, function( array $property ): bool {
-			$type  = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
-			$model = $property[ PropertyItem::MODEL ] ?? null;
+			$type = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
 
 			if ( PropertyType::OBJECT === $type || PropertyType::ARRAY === $type ) {
-				if ( Utils::isModel( $model ) && $model::idProperty() ) {
+				$model = $property[ PropertyItem::MODEL ] ?? null;
+				$match = $property[ PropertyItem::MATCH ] ?? null;
+
+				if ( Utils::isModel( $model ) && ( $match || $model::idProperty() ) ) {
 					return true;
 				}
 			}
@@ -1945,9 +1947,14 @@ class PdoStore implements StoreInterface {
 			$value = &$model[ $id ];
 
 			if ( PropertyType::ARRAY === $type ) {
-				$select = $this->selectChildrenStatement( get_class( $model ), $child, $id );
-				$rows   = $this->select( $select, (array) $model->id() );
-				$value  = array_map( [ $child, 'create' ], $rows );
+				if ( $match = $property[ PropertyItem::MATCH ] ?? null ) {
+					$query  = $this->selectRowQuery( $this->getTableName( $child ), $match );
+					$select = $this->prepare( $query );
+				} else {
+					$select = $this->selectChildrenStatement( get_class( $model ), $child, $id );
+				}
+				$rows  = $this->select( $select, (array) $model->id() );
+				$value = array_map( [ $child, 'create' ], $rows );
 				static::restoreMulti( $child, $value );
 			} elseif ( PropertyType::OBJECT === $type && isset( $value ) ) {
 				$value = $this->get( $child, $value );
@@ -1989,10 +1996,16 @@ class PdoStore implements StoreInterface {
 
 			if ( PropertyType::ARRAY === $type ) {
 				$dummy = array_fill( 0, count( $ids ), null );
-				$query = $this->selectChildrenQuery( $class, $child, $id, $dummy );
+
+				if ( $match = $property[ PropertyItem::MATCH ] ?? null ) {
+					$query = $this->listRowsQuery( $this->getTableName( $child ), $match, $dummy );
+				} else {
+					$match = '_parent';
+					$query = $this->selectChildrenQuery( $class, $child, $id, $dummy );
+				}
 
 				foreach ( $this->query( $query, $ids ) as $row ) {
-					$model = $index[ $row['_parent'] ];
+					$model = $index[ $row[ $match ] ];
 					$sub   = $model[ $id ][] = $children[ $child ][] = new $child( $row );
 				}
 			} elseif ( PropertyType::OBJECT === $type ) {
