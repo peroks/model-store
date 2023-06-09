@@ -201,7 +201,7 @@ class JsonStore implements StoreInterface {
 	/**
 	 * @param array|object $options
 	 */
-	public function init( $options ): void {
+	public function init( array | object $options ): void {
 		$default = [
 			'force_add'    => false,
 			'force_update' => false,
@@ -235,7 +235,7 @@ class JsonStore implements StoreInterface {
 	 *
 	 * @param JsonStore|array|string $source The source containing the data to import.
 	 */
-	public function import( $source ): void {
+	public function import( mixed $source ): void {
 		if ( is_array( $source ) ) {
 			$data = $source;
 		} elseif ( $source instanceof self ) {

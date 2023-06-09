@@ -3,8 +3,6 @@
 use Peroks\Model\Property;
 use Peroks\Model\PropertyItem;
 use Peroks\Model\PropertyType;
-use Peroks\Model\Utils;
-use Traversable;
 
 /**
  * The store model class.
@@ -32,7 +30,7 @@ class Model extends \Peroks\Model\Model implements ModelInterface {
 	 *
 	 * @return mixed The prepared property value.
 	 */
-	protected static function prepareProperty( $value, $property ) {
+	protected static function prepareProperty( mixed $value, Property | array $property ): mixed {
 		$value = parent::prepareProperty( $value, $property );
 		$type  = $property[ PropertyItem::TYPE ] ?? null;
 
