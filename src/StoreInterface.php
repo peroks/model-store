@@ -23,7 +23,7 @@ interface StoreInterface {
 	 *
 	 * @return bool True if the model exists, false otherwise.
 	 */
-	public function exists( string $class, string $id ): bool;
+	public function exists( string $class, int | string $id ): bool;
 
 	/**
 	 * Gets a model matching the given id from the data store.
@@ -33,7 +33,7 @@ interface StoreInterface {
 	 *
 	 * @return ModelInterface|null The matching model or null if not found.
 	 */
-	public function get( string $class, string $id ): ?ModelInterface;
+	public function get( string $class, int | string $id ): ?ModelInterface;
 
 	/**
 	 * Gets a list of models matching the given ids from the data store.
@@ -81,11 +81,11 @@ interface StoreInterface {
 	 * Deletes a model from the data store.
 	 *
 	 * @param ModelInterface|string $class The model class name.
-	 * @param string $id The model id.
+	 * @param int|string $id The model id.
 	 *
 	 * @return bool True if the model existed, false otherwise.
 	 */
-	public function delete( string $class, string $id ): bool;
+	public function delete( string $class, int | string $id ): bool;
 
 	/* -------------------------------------------------------------------------
 	 * Data store handling

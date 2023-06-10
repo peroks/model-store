@@ -43,7 +43,7 @@ class MysqlStore extends PdoStore implements StoreInterface {
 		try {
 			$db = new mysqli( $connect->host, $connect->user, $connect->pass, $connect->name );
 			$db->set_charset( 'utf8mb4' );
-		} catch ( mysqli_sql_exception $e ) {
+		} catch ( mysqli_sql_exception ) {
 			$db = new mysqli( $connect->host, $connect->user, $connect->pass );
 			$db->set_charset( 'utf8mb4' );
 			$db->real_query( $this->createDatabaseQuery( $connect->name ) );
@@ -168,7 +168,7 @@ class MysqlStore extends PdoStore implements StoreInterface {
 	 *
 	 * @return mixed A safe variable to be used in a sql statement.
 	 */
-	protected function escape( $value ) {
+	protected function escape( mixed $value ): mixed {
 		return is_string( $value ) ? "'" . $this->db->real_escape_string( $value ) . "'" : $value;
 	}
 

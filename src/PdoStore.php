@@ -75,7 +75,7 @@ class PdoStore implements StoreInterface {
 		try {
 			$dsn = "mysql:charset=utf8mb4;host={$connect->host};dbname={$connect->name}";
 			$db  = new PDO( $dsn, $connect->user, $connect->pass, $args );
-		} catch ( PDOException $e ) {
+		} catch ( PDOException ) {
 			$dsn = "mysql:charset=utf8mb4;host={$connect->host}";
 			$db  = new PDO( $dsn, $connect->user, $connect->pass, $args );
 
@@ -193,7 +193,7 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @return mixed A safe variable to be used in a sql statement.
 	 */
-	protected function escape( $value ) {
+	protected function escape( mixed $value ): mixed {
 		return is_string( $value ) ? $this->db->quote( $value ) : $value;
 	}
 
@@ -209,7 +209,7 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @return bool True if the model exists, false otherwise.
 	 */
-	public function exists( string $class, string $id ): bool {
+	public function exists( string $class, int | string $id ): bool {
 		$query  = $this->existsRowStatement( $class );
 		$result = $this->select( $query, [ $id ] );
 		return (bool) $result;
@@ -223,7 +223,7 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @return ModelInterface|null The matching model or null if not found.
 	 */
-	public function get( string $class, string $id ): ?ModelInterface {
+	public function get( string $class, int | string $id ): ?ModelInterface {
 		$query = $this->selectRowStatement( $class );
 		$rows  = $this->select( $query, [ $id ] );
 
@@ -339,11 +339,11 @@ class PdoStore implements StoreInterface {
 	 * Deletes a model from the data store.
 	 *
 	 * @param ModelInterface|string $class The model class name.
-	 * @param string $id The model id.
+	 * @param int|string $id The model id.
 	 *
 	 * @return bool True if the model existed, false otherwise.
 	 */
-	public function delete( string $class, string $id ): bool {
+	public function delete( string $class, int | string $id ): bool {
 		$this->beginTransaction();
 
 		try {
@@ -360,11 +360,11 @@ class PdoStore implements StoreInterface {
 	 * Deletes a model from the data store.
 	 *
 	 * @param ModelInterface|string $class The model class name.
-	 * @param string $id The model id.
+	 * @param int|string $id The model id.
 	 *
 	 * @return bool True if the model existed, false otherwise.
 	 */
-	protected function deleteInternal( string $class, string $id ): bool {
+	protected function deleteInternal( string $class, int | string $id ): bool {
 		$query = $this->deleteRowStatement( $class );
 		return (bool) $this->update( $query, [ $id ] );
 	}
@@ -663,7 +663,7 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @return string A column definition query.
 	 */
-	protected function defineColumnQuery( array $property ): string {
+	protected function defineColumnQuery( Property | array $property ): string {
 		$type     = $property['type'];
 		$required = $property['required'] ?? null;
 		$default  = $property['default'] ?? null;
@@ -773,7 +773,7 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @return string The column data type.
 	 */
-	protected function getColumnType( $property ): string {
+	protected function getColumnType( Property | array $property ): string {
 		$type = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
 
 		switch ( $type ) {
@@ -891,14 +891,11 @@ class PdoStore implements StoreInterface {
 		$name    = $this->name( $index['name'] );
 		$columns = join( ', ', array_map( [ $this, 'name' ], $index['columns'] ) );
 
-		switch ( $index['type'] ?? 'INDEX' ) {
-			case 'PRIMARY':
-				return sprintf( 'PRIMARY KEY (%s)', $columns );
-			case 'UNIQUE':
-				return sprintf( 'UNIQUE %s (%s)', $name, $columns );
-			default:
-				return sprintf( 'INDEX %s (%s)', $name, $columns );
-		}
+		return match ( $index['type'] ?? 'INDEX' ) {
+			'PRIMARY' => sprintf( 'PRIMARY KEY (%s)', $columns ),
+			'UNIQUE'  => sprintf( 'UNIQUE %s (%s)', $name, $columns ),
+			default   => sprintf( 'INDEX %s (%s)', $name, $columns ),
+		};
 	}
 
 	/**
@@ -1382,7 +1379,7 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @return string A query for selecting child models.
 	 */
-	protected function selectChildrenQuery( string $parent, string $child, string $id, $value = null ): string {
+	protected function selectChildrenQuery( string $parent, string $child, string $id, mixed $value = null ): string {
 		$relation = $this->getRelationName( $parent, $id );
 		$table    = $this->getTableName( $relation );
 
@@ -1432,7 +1429,7 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @return string A query for selecting relation rows.
 	 */
-	protected function selectRelationQuery( string $table, $value = null ): string {
+	protected function selectRelationQuery( string $table, string | int | null $value = null ): string {
 		return vsprintf( 'SELECT * FROM %s WHERE %s = %s ORDER BY %s ASC', [
 			$this->name( $table ),
 			$this->name( '_parent' ),
@@ -1543,11 +1540,11 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @param string $table The table name.
 	 * @param string $primary The name of the primary key column.
-	 * @param string|int $value The model id to check for.
+	 * @param string|int|null $value The model id to check for.
 	 *
 	 * @return string A query to check if a model exists.
 	 */
-	protected function existsRowQuery( string $table, string $primary, $value = null ): string {
+	protected function existsRowQuery( string $table, string $primary, string | int | null $value = null ): string {
 		return vsprintf( 'SELECT 1 FROM %s WHERE %s = %s LIMIT 1', [
 			$this->name( $table ),
 			$this->name( $primary ),
@@ -1577,11 +1574,11 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @param string $table The table name.
 	 * @param string $primary The name of the primary key column.
-	 * @param string|int $value The model id to select.
+	 * @param string|int|null $value The model id to select.
 	 *
 	 * @return string A query for selecting a single model.
 	 */
-	protected function selectRowQuery( string $table, string $primary, $value = null ): string {
+	protected function selectRowQuery( string $table, string $primary, string | int | null $value = null ): string {
 		return vsprintf( 'SELECT * FROM %s WHERE %s = %s', [
 			$this->name( $table ),
 			$this->name( $primary ),
@@ -1807,11 +1804,11 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @param string $table The table name.
 	 * @param string $primary The name of the primary key column.
-	 * @param string|int $value The model id to delete.
+	 * @param string|int|null $value The model id to delete.
 	 *
 	 * @return string A query for inserting a model into the given table.
 	 */
-	protected function deleteRowQuery( string $table, string $primary, $value = null ): string {
+	protected function deleteRowQuery( string $table, string $primary, string | int | null $value = null ): string {
 		return vsprintf( 'DELETE FROM %s WHERE %s = %s', [
 			$this->name( $table ),
 			$this->name( $primary ),
@@ -1877,7 +1874,7 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @return mixed A value to be store in a database column.
 	 */
-	protected function getPropertyValue( $value, array $property ) {
+	protected function getPropertyValue( mixed $value, Property | array $property ): mixed {
 		$type  = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
 		$child = $property[ PropertyItem::MODEL ] ?? null;
 

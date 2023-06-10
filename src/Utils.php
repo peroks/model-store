@@ -20,7 +20,7 @@ class Utils extends \Peroks\Model\Utils {
 	 *
 	 * @return bool
 	 */
-	public static function isColumn( $property ): bool {
+	public static function isColumn( Property | array $property ): bool {
 		$type = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
 
 		// Storing functions is not supported.
@@ -48,7 +48,7 @@ class Utils extends \Peroks\Model\Utils {
 	 *
 	 * @return bool
 	 */
-	public static function isRelation( $property ): bool {
+	public static function isRelation( Property | array $property ): bool {
 		$type = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
 
 		if ( PropertyType::ARRAY === $type && empty( $property[ PropertyItem::MATCH ] ) ) {
@@ -69,7 +69,7 @@ class Utils extends \Peroks\Model\Utils {
 	 *
 	 * @return bool
 	 */
-	public static function needsForeignKey( $property ): bool {
+	public static function needsForeignKey( Property | array $property ): bool {
 		$type = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
 
 		if ( PropertyType::ARRAY !== $type && empty( $property[ PropertyItem::MATCH ] ) ) {
