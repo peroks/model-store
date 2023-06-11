@@ -1,7 +1,7 @@
 {
 	"name": "peroks/model-store",
 	"type": "library",
-	"description": "Model store: Persistent model data store",
+	"description": "Model Store: Permanent data store for models.",
 	"minimum-stability": "stable",
 	"version": "0.1.0",
 	"license": "MIT",
