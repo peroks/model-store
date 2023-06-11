@@ -29,7 +29,7 @@ recommended way it to create a `Store instance` and use the
 
 ### Connecting to a model store
 
-In order to connect to a model store, you must first create a new **store instance**.
+In order to connect to a model store, you must create a new **store instance**.
 Currently, three different model stores are supported:
 
 - `JsonStore`: JSON file store
@@ -41,7 +41,7 @@ You can also create your own implementation of the
 
 #### JSON file store
 
-Storing your models in a JSON file is only recommended for a **very small** data
+Storing your models in a JSON file is only recommended for **very small** data
 stores, no more than a few MBs. It's intended for use in **development**
 and **rapid prototyping**, but not for **production**. For each PHP request
 the complete JSON file is loaded into memory, and it will consume more
@@ -94,8 +94,8 @@ if you prefer. Just replace the store class `PdoStore` with `MysqlStore`.
 
 Before you can start using a database store, you need to build the
 **database schema** based on your models. Fortunately, you don't need to do this
-manually. To create (and update) your database schema, you call the `build`
-method with an array of all the models you want to store.
+manually. To create (and update) your database schema, call the `build`
+method with an array of all the **model class names** that you want to store.
 
     use Peroks\Model\Store\MysqlStore;
     $store = new MysqlStore( $connection );
@@ -164,7 +164,7 @@ pairs of property ids and their values, i.e.
 
 #### Add or update a model in the store
 
-    $model = new Artist( [ 'first_name' => 'Tom', 'last_name'  => 'Waits' ] );
+    $model = new Artist( [ 'first_name' => 'Tom', 'last_name' => 'Waits' ] );
     $store->set( $model );
 
 #### Delete a model from the store
