@@ -40,11 +40,11 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Constructor.
 	 *
-	 * @param object $connect Connections parameters: host, user, pass, name, port, socket.
+	 * @param array|object $connect Connections parameters: host, user, pass, name, port, socket.
 	 */
-	public function __construct( object $connect ) {
+	public function __construct( array | object $connect ) {
 		$this->dbname = $connect->name;
-		$this->connect( $connect );
+		$this->connect( (object) $connect );
 	}
 
 	/* -------------------------------------------------------------------------

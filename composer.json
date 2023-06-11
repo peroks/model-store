@@ -5,6 +5,15 @@
 	"minimum-stability": "stable",
 	"version": "0.1.0",
 	"license": "MIT",
+	"keywords": [
+		"json",
+		"database",
+		"pdo",
+		"persistent-storage",
+		"pdo-mysql",
+		"mysql",
+		"mysqli"
+	],
 	"authors": [
 		{
 			"name": "Per Egil Roksvaag",
