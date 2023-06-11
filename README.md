@@ -10,9 +10,9 @@ if it's not stable yet.
 ## Reason why
 
 The purpose of this package is to store models **permanently**. Currently,
-JSON files and MySql databases (mysqli and pdo-mysql) are supported.
+**JSON files** and **MySql databases** (mysqli and pdo-mysql) are supported.
 
-The Model Store is a common abstraction layer on top of the permanent store.
+The Model Store is an abstraction layer on top of the permanent store.
 It automatically creates **JSON files** or **database schemas** for you based
 on your models.
 
@@ -42,13 +42,14 @@ You can also create your own implementation of the
 #### JSON file store
 
 Storing your models in a JSON file is only recommended for a **very small** data
-stores, no more than a few MB. For each PHP request the complete JSON file is
-loaded into memory, and will require more and more **rem** and **cpu** as the
-file grows.
+stores, no more than a few MBs. It's intended for use in **development**
+and **rapid prototyping**, but not for **production**. For each PHP request
+the complete JSON file is loaded into memory, and it will consume more
+and more **ram** and **cpu** as the file grows. 
 
 To connect to a JSON file store, just provide the full path and file name
 to the JSON file which contains your models. If the file does not
-exist, it will be crated.
+exist, it will be created.
 
     use Peroks\Model\Store\JsonStore;
     $store = new JsonStore( '/<path>/<filename>.json' );
@@ -92,7 +93,7 @@ if you prefer. Just replace the store class `PdoStore` with `MysqlStore`.
 ### Creating and Updating database schemas
 
 Before you can start using a database store, you need to build the
-**database schema** based on your models. Fortunately, you don't have to do this
+**database schema** based on your models. Fortunately, you don't need to do this
 manually. To create (and update) your database schema, you call the `build`
 method with an array of all the models you want to store.
 
