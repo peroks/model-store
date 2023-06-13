@@ -36,5 +36,13 @@
 	"require": {
 		"peroks/model": "^1.0",
 		"php": "^8.1"
+	},
+	"suggest": {
+		"ext-pdo": "Required for PDO model stores",
+		"ext-mysqli": "Required for native MySQL model stores"
+	},
+	"config": {
+		"preferred-install": "dist",
+		"sort-packages": true
 	}
 }

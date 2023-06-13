@@ -43,7 +43,7 @@ You can also create your own implementation of the
 
 Storing your models in a JSON file is only recommended for **very small** data
 stores, no more than a few MBs. It's intended for use in **development**
-and **rapid prototyping**, but not for **production**. For each PHP request
+and **rapid prototyping**, but not in **production**. For each PHP request
 the complete JSON file is loaded into memory, and it will consume more
 and more **ram** and **cpu** as the file grows. 
 
