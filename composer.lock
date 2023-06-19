@@ -12,7 +12,7 @@
             "dist": {
                 "type": "path",
                 "url": "../model",
-                "reference": "1c5ac924bc9ab0e64106023a2b75135ee8064026"
+                "reference": "e1a60a128d99e5f60509ec6aaee3ed623d6c6105"
             },
             "require": {
                 "php": "^8.1"
