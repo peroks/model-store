@@ -2,7 +2,6 @@
 
 use PDO, PDOException, PDOStatement;
 use Peroks\Model\ModelData;
-use Peroks\Model\ModelInterface;
 use Peroks\Model\Property;
 use Peroks\Model\PropertyItem;
 use Peroks\Model\PropertyType;
@@ -223,7 +222,7 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @return ModelInterface|null The matching model or null if not found.
 	 */
-	public function get( string $class, int | string $id ): ?ModelInterface {
+	public function get( string $class, int | string $id ): ModelInterface | null {
 		$query = $this->selectRowStatement( $class );
 		$rows  = $this->select( $query, [ $id ] );
 

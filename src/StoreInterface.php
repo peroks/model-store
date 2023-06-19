@@ -1,7 +1,5 @@
 <?php namespace Peroks\Model\Store;
 
-use Peroks\Model\ModelInterface;
-
 /**
  * Interface for storing and retrieving models from a data store.
  *
@@ -33,7 +31,7 @@ interface StoreInterface {
 	 *
 	 * @return ModelInterface|null The matching model or null if not found.
 	 */
-	public function get( string $class, int | string $id ): ?ModelInterface;
+	public function get( string $class, int | string $id ): ModelInterface | null;
 
 	/**
 	 * Gets a list of models matching the given ids from the data store.

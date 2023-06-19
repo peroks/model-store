@@ -3,7 +3,7 @@
 	"type": "library",
 	"description": "Model Store: Permanent data store for models.",
 	"minimum-stability": "stable",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"license": "MIT",
 	"keywords": [
 		"json",
@@ -40,9 +40,5 @@
 	"suggest": {
 		"ext-pdo": "Required for PDO model stores",
 		"ext-mysqli": "Required for native MySQL model stores"
-	},
-	"config": {
-		"preferred-install": "dist",
-		"sort-packages": true
 	}
 }

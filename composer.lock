@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "4d3150f5e3c790f37e5530ec40dbcc57",
+    "content-hash": "bc7a3f42970f747b1df010347f75f9ae",
     "packages": [
         {
             "name": "peroks/model",
@@ -12,13 +12,16 @@
             "dist": {
                 "type": "path",
                 "url": "../model",
-                "reference": "30905a4550d3cde34ce5765f15b3d4244bc5d8d8"
+                "reference": "1c5ac924bc9ab0e64106023a2b75135ee8064026"
             },
             "require": {
                 "php": "^8.1"
             },
             "require-dev": {
                 "phpunit/phpunit": "^10"
+            },
+            "suggest": {
+                "peroks/model-store": "Permanent data store for models"
             },
             "type": "library",
             "autoload": {
@@ -41,6 +44,12 @@
                 }
             ],
             "description": "Models: Classes with built-in data validation",
+            "keywords": [
+                "arrayobject",
+                "data-validation",
+                "json",
+                "rest-api"
+            ],
             "transport-options": {
                 "relative": true
             }

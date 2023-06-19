@@ -1,7 +1,6 @@
 <?php namespace Peroks\Model\Store;
 
 use Peroks\Model\ModelData;
-use Peroks\Model\ModelInterface;
 
 /**
  * Class for storing and retrieving models from a JSON data store.
@@ -75,7 +74,7 @@ class JsonStore implements StoreInterface {
 	 *
 	 * @return ModelInterface|null The matching model or null if not found.
 	 */
-	public function get( string $class, int | string $id ): ?ModelInterface {
+	public function get( string $class, int | string $id ): ModelInterface | null {
 		if ( $this->exists( $class, $id ) ) {
 			$data = array_replace( $this->data[ $class ][ $id ] ?? [], $this->changes[ $class ][ $id ] ?? [] );
 			return new $class( $data );
