@@ -92,7 +92,7 @@ class JsonStore implements StoreInterface {
 	 */
 	public function list( string $class, array $ids ): array {
 		foreach ( $ids as $id ) {
-			$result[ $id ] = $this->get( $id, $class );
+			$result[ $id ] = $this->get( $class, $id );
 		}
 		return array_filter( $result ?? [] );
 	}
