@@ -285,11 +285,6 @@ class JsonStore implements StoreInterface {
 			}
 		}
 
-		foreach ( $data as $class => &$pairs ) {
-			$pairs = array_filter( $pairs );
-			static::sort( $pairs );
-		}
-
 		return $data;
 	}
 
