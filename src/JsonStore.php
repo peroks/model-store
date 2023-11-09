@@ -161,8 +161,8 @@ class JsonStore implements StoreInterface {
 	 */
 	public function delete( string $class, int | string $id ): bool {
 		if ( $this->exists( $class, $id ) ) {
-			$this->data[ $class ][ $id ]    = null;
-			$this->changes[ $class ][ $id ] = null;
+			unset( $this->data[ $class ][ $id ] );
+			unset( $this->changes[ $class ][ $id ] );
 			return true;
 		}
 		return false;
