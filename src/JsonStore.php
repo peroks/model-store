@@ -19,7 +19,12 @@ class JsonStore implements StoreInterface {
 	/**
 	 * @var array Changed data
 	 */
-	protected array $changes = [];
+	protected array $changed = [];
+
+	/**
+	 * @var array Deleted models
+	 */
+	protected array $deleted = [];
 
 	/**
 	 * @var object Global options.
@@ -62,8 +67,8 @@ class JsonStore implements StoreInterface {
 	 * @return bool True if the model exists, false otherwise.
 	 */
 	public function exists( string $class, int | string $id ): bool {
-		return ! empty( $this->data[ $class ][ $id ] )
-			|| ! empty( $this->changes[ $class ][ $id ] );
+		return isset( $this->data[ $class ][ $id ] )
+			|| isset( $this->changed[ $class ][ $id ] );
 	}
 
 	/**
@@ -76,7 +81,7 @@ class JsonStore implements StoreInterface {
 	 */
 	public function get( string $class, int | string $id ): ModelInterface | null {
 		if ( $this->exists( $class, $id ) ) {
-			$data = array_replace( $this->data[ $class ][ $id ] ?? [], $this->changes[ $class ][ $id ] ?? [] );
+			$data = array_replace( $this->data[ $class ][ $id ] ?? [], $this->changed[ $class ][ $id ] ?? [] );
 			return new $class( $data );
 		}
 		return null;
@@ -125,10 +130,10 @@ class JsonStore implements StoreInterface {
 	 * @return ModelInterface[] An array of models.
 	 */
 	public function all( string $class ): array {
-		return array_map( [ $class, 'create' ], array_filter( array_replace(
+		return array_map( [ $class, 'create' ], array_replace(
 			$this->data[ $class ] ?? [],
-			$this->changes[ $class ] ?? []
-		) ) );
+			$this->changed[ $class ] ?? []
+		) );
 	}
 
 	/* -------------------------------------------------------------------------
@@ -147,7 +152,8 @@ class JsonStore implements StoreInterface {
 		$class = get_class( $model );
 		$data  = $model->validate( true )->data( ModelData::COMPACT );
 
-		$this->changes[ $class ][ $id ] = $data;
+		$this->changed[ $class ][ $id ] = $data;
+		unset( $this->deleted[ $class ][ $id ] );
 		return $model;
 	}
 
@@ -161,8 +167,9 @@ class JsonStore implements StoreInterface {
 	 */
 	public function delete( string $class, int | string $id ): bool {
 		if ( $this->exists( $class, $id ) ) {
-			$this->data[ $class ][ $id ]    = null;
-			$this->changes[ $class ][ $id ] = null;
+			unset( $this->data[ $class ][ $id ] );
+			unset( $this->changed[ $class ][ $id ] );
+			$this->deleted[ $class ][ $id ] = null;
 			return true;
 		}
 		return false;
@@ -279,9 +286,15 @@ class JsonStore implements StoreInterface {
 	 * @param array $data The data to be merged.
 	 */
 	public function merge( array $data ): array {
-		foreach ( $this->changes as $class => $pairs ) {
-			foreach ( $pairs as $id => $inst ) {
-				$data[ $class ][ $id ] = $inst;
+		foreach ( $this->changed as $class => $models ) {
+			foreach ( $models as $id => $model ) {
+				$data[ $class ][ $id ] = $model;
+			}
+		}
+
+		foreach ( $this->deleted as $class => $models ) {
+			foreach ( $models as $id => $model ) {
+				unset( $data[ $class ][ $id ] );
 			}
 		}
 
@@ -298,7 +311,7 @@ class JsonStore implements StoreInterface {
 	 * @return bool True if data changes exists and were saved, false otherwise.
 	 */
 	public function save(): bool {
-		if ( empty( $this->changes ) ) {
+		if ( empty( $this->changed ) && empty( $this->deleted ) ) {
 			return false;
 		}
 
@@ -307,7 +320,8 @@ class JsonStore implements StoreInterface {
 		$this->write( $this->source, $data );
 
 		$this->data    = $data;
-		$this->changes = [];
+		$this->changed = [];
+		$this->deleted = [];
 
 		return true;
 	}
