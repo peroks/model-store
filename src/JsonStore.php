@@ -62,8 +62,8 @@ class JsonStore implements StoreInterface {
 	 * @return bool True if the model exists, false otherwise.
 	 */
 	public function exists( string $class, int | string $id ): bool {
-		return isset( $this->data[ $class ][ $id ] )
-			|| isset( $this->changes[ $class ][ $id ] );
+		return ! empty( $this->data[ $class ][ $id ] )
+			|| ! empty( $this->changes[ $class ][ $id ] );
 	}
 
 	/**
@@ -125,10 +125,10 @@ class JsonStore implements StoreInterface {
 	 * @return ModelInterface[] An array of models.
 	 */
 	public function all( string $class ): array {
-		return array_map( [ $class, 'create' ], array_replace(
+		return array_map( [ $class, 'create' ], array_filter( array_replace(
 			$this->data[ $class ] ?? [],
 			$this->changes[ $class ] ?? []
-		) );
+		) ) );
 	}
 
 	/* -------------------------------------------------------------------------
@@ -161,8 +161,8 @@ class JsonStore implements StoreInterface {
 	 */
 	public function delete( string $class, int | string $id ): bool {
 		if ( $this->exists( $class, $id ) ) {
-			unset( $this->data[ $class ][ $id ] );
-			unset( $this->changes[ $class ][ $id ] );
+			$this->data[ $class ][ $id ]    = null;
+			$this->changes[ $class ][ $id ] = null;
 			return true;
 		}
 		return false;
