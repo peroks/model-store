@@ -1521,7 +1521,7 @@ class PdoStore implements StoreInterface {
 	 * @return ModelInterface The same model instance for chaining.
 	 */
 	protected function updateRelations( ModelInterface $model ): ModelInterface {
-		$relations = static::getRelationProperties( $model::properties() );
+		$relations = Utils::getRelationProperties( $model::properties() );
 
 		foreach ( array_keys( $relations ) as $id ) {
 			$this->updateRelation( $model, $id );
@@ -1931,17 +1931,6 @@ class PdoStore implements StoreInterface {
 			}
 			return false;
 		} );
-	}
-
-	/**
-	 * Filters out model properties that are stored in a separate relation table.
-	 *
-	 * @param Property[]|array[] $properties The model properties.
-	 *
-	 * @return Property[]|array[] Properties that are stored in a separate relation table.
-	 */
-	protected static function getRelationProperties( array $properties ): array {
-		return array_filter( $properties, [ Utils::class, 'isRelation' ] );
 	}
 
 	/**

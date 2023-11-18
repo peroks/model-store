@@ -63,6 +63,17 @@ class Utils extends \Peroks\Model\Utils {
 	}
 
 	/**
+	 * Filters out model properties that are stored in a separate relation table.
+	 *
+	 * @param Property[]|array[] $properties The model properties.
+	 *
+	 * @return Property[]|array[] Properties that are stored in a separate relation table.
+	 */
+	public static function getRelationProperties( array $properties ): array {
+		return array_filter( $properties, [ static::class, 'isRelation' ] );
+	}
+
+	/**
 	 * Checks if a model property needs a foreign key.
 	 *
 	 * @param Property|array $property The property.

@@ -1,6 +1,10 @@
-<?php declare( strict_types = 1 ); namespace Peroks\Model\Store;
+<?php declare( strict_types = 1 );
+
+namespace Peroks\Model\Store;
 
 use Peroks\Model\ModelData;
+use Peroks\Model\PropertyItem;
+use Peroks\Model\PropertyType;
 
 /**
  * Class for storing and retrieving models from a JSON data store.
@@ -10,27 +14,22 @@ use Peroks\Model\ModelData;
  * @license MIT
  */
 class JsonStore implements StoreInterface {
-
 	/**
 	 * @var array Stored data.
 	 */
 	protected array $data = [];
-
 	/**
 	 * @var array Changed data
 	 */
 	protected array $changed = [];
-
 	/**
 	 * @var array Deleted models
 	 */
 	protected array $deleted = [];
-
 	/**
 	 * @var object Global options.
 	 */
 	protected object $options;
-
 	/**
 	 * @var string JSON source file.
 	 */
@@ -82,6 +81,7 @@ class JsonStore implements StoreInterface {
 	public function get( string $class, int | string $id ): ModelInterface | null {
 		if ( $this->has( $class, $id ) ) {
 			$data = array_replace( $this->data[ $class ][ $id ] ?? [], $this->changed[ $class ][ $id ] ?? [] );
+			$data = $this->join( $class, $data );
 			return new $class( $data );
 		}
 		return null;
@@ -130,10 +130,12 @@ class JsonStore implements StoreInterface {
 	 * @return ModelInterface[] An array of models.
 	 */
 	public function all( string $class ): array {
-		return array_map( [ $class, 'create' ], array_replace(
-			$this->data[ $class ] ?? [],
-			$this->changed[ $class ] ?? []
-		) );
+		$all = array_replace( $this->data[ $class ] ?? [], $this->changed[ $class ] ?? [] );
+
+		return array_map( function( array $data ) use ( $class ): ModelInterface {
+			$data = $this->join( $class, $data );
+			return new $class( $data );
+		}, $all );
 	}
 
 	/* -------------------------------------------------------------------------
@@ -151,6 +153,7 @@ class JsonStore implements StoreInterface {
 		$id    = $model->id();
 		$class = get_class( $model );
 		$data  = $model->validate( true )->data( ModelData::COMPACT );
+		$data  = $this->split( $model, $data );
 
 		$this->changed[ $class ][ $id ] = $data;
 		unset( $this->deleted[ $class ][ $id ] );
@@ -173,6 +176,62 @@ class JsonStore implements StoreInterface {
 			return true;
 		}
 		return false;
+	}
+
+	/* -------------------------------------------------------------------------
+	 * Joining and splitting models.
+	 * ---------------------------------------------------------------------- */
+
+	/**
+	 * Replaces sum-model ids with the sub-model itself.
+	 *
+	 * @param ModelInterface|string $class The class name to join.
+	 * @param array $data The model data.
+	 */
+	protected function join( ModelInterface | string $class, array $data ): array {
+		$properties = $class::properties();
+
+		foreach ( $data as $key => &$value ) {
+			$property = $properties[ $key ];
+
+			if ( $class = $property[ PropertyItem::MODEL ] ?? null ) {
+				if ( $value && $class::idProperty() ) {
+					$get   = fn( int | string $id ): ModelInterface => $this->get( $class, $id );
+					$value = match ( $property[ PropertyItem::TYPE ] ) {
+						PropertyType::OBJECT => $this->get( $class, $value ),
+						PropertyType::ARRAY  => array_filter( array_map( $get, $value ) ),
+					};
+				}
+			}
+		}
+
+		return $data;
+	}
+
+	/**
+	 * Replaces sub-models with their ids before storing.
+	 *
+	 * @param ModelInterface $model The model to split.
+	 * @param array $data The model data.
+	 */
+	protected function split( ModelInterface $model, array $data ): array {
+		$properties = $model::properties();
+
+		foreach ( $data as $id => &$value ) {
+			$property = $properties[ $id ];
+
+			if ( $class = $property[ PropertyItem::MODEL ] ?? null ) {
+				if ( $value && $class::idProperty() ) {
+					$set   = fn( ModelInterface $item ): int | string => $this->set( $item )->id();
+					$value = match ( $property[ PropertyItem::TYPE ] ) {
+						PropertyType::OBJECT => $this->set( $model[ $id ] )->id(),
+						PropertyType::ARRAY  => array_map( $set, $model[ $id ] )
+					};
+				}
+			}
+		}
+
+		return $data;
 	}
 
 	/* -------------------------------------------------------------------------
@@ -301,7 +360,7 @@ class JsonStore implements StoreInterface {
 		return $data;
 	}
 
-	public function open() {
+	public function open(): void {
 		$this->data = $this->read( $this->source );
 	}
 
@@ -330,7 +389,7 @@ class JsonStore implements StoreInterface {
 	 * Utils
 	 * ---------------------------------------------------------------------- */
 
-	public static function sort( array &$data ) {
-		ksort( $data, SORT_NATURAL );
+	public static function sort( array &$data ): bool {
+		return ksort( $data, SORT_NATURAL );
 	}
 }
