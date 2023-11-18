@@ -21,7 +21,7 @@ interface StoreInterface {
 	 *
 	 * @return bool True if the model exists, false otherwise.
 	 */
-	public function exists( string $class, int | string $id ): bool;
+	public function has( string $class, int | string $id ): bool;
 
 	/**
 	 * Gets a model matching the given id from the data store.

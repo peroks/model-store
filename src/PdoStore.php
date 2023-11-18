@@ -208,7 +208,7 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @return bool True if the model exists, false otherwise.
 	 */
-	public function exists( string $class, int | string $id ): bool {
+	public function has( string $class, int | string $id ): bool {
 		$query  = $this->existsRowStatement( $class );
 		$result = $this->select( $query, [ $id ] );
 		return (bool) $result;
@@ -324,7 +324,7 @@ class PdoStore implements StoreInterface {
 	 */
 	protected function setInternal( ModelInterface $model ): ModelInterface {
 		$class = get_class( $model );
-		$query = $this->exists( $class, $model->id() )
+		$query = $this->has( $class, $model->id() )
 			? $this->updateRowStatement( $class )
 			: $this->insertRowStatement( $class );
 
