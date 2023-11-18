@@ -1,4 +1,4 @@
-<?php namespace Peroks\Model\Store;
+<?php declare( strict_types = 1 ); namespace Peroks\Model\Store;
 
 /**
  * The store model class.
