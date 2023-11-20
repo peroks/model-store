@@ -1,5 +1,4 @@
-<?php declare( strict_types = 1 ); namespace Peroks\Model\Store;
-
+<?php
 /**
  * Interface for storing and retrieving models from a data store.
  *
@@ -7,6 +6,10 @@
  * @copyright Per Egil Roksvaag
  * @license MIT
  */
+
+declare( strict_types = 1 );
+namespace Peroks\Model\Store;
+
 interface StoreInterface {
 
 	/* -------------------------------------------------------------------------
@@ -16,7 +19,7 @@ interface StoreInterface {
 	/**
 	 * Checks if a model with the given id exists in the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param int|string $id The model id.
 	 *
 	 * @return bool True if the model exists, false otherwise.
@@ -26,7 +29,7 @@ interface StoreInterface {
 	/**
 	 * Gets a model matching the given id from the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param int|string $id The model id.
 	 *
 	 * @return ModelInterface|null The matching model or null if not found.
@@ -36,7 +39,7 @@ interface StoreInterface {
 	/**
 	 * Gets a list of models matching the given ids from the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param int[]|string[] $ids An array of model ids.
 	 *
 	 * @return ModelInterface[] An array of matching models.
@@ -46,7 +49,7 @@ interface StoreInterface {
 	/**
 	 * Gets a filtered list of models from the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param array $filter Properties (key/value pairs) to match the stored models.
 	 *
 	 * @return ModelInterface[] An array of models.
@@ -56,7 +59,7 @@ interface StoreInterface {
 	/**
 	 * Gets all models of the given class in the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 *
 	 * @return ModelInterface[] An array of models.
 	 */
@@ -78,7 +81,7 @@ interface StoreInterface {
 	/**
 	 * Deletes a model from the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param int|string $id The model id.
 	 *
 	 * @return bool True if the model existed, false otherwise.

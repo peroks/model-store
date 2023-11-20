@@ -1,12 +1,15 @@
-<?php declare( strict_types = 1 ); namespace Peroks\Model\Store;
-
+<?php
 /**
- * The store model interface.
+ * An extended model interface for use in data stores.
  *
  * @author Per Egil Roksvaag
  * @copyright Per Egil Roksvaag
  * @license MIT
  */
+
+declare( strict_types = 1 );
+namespace Peroks\Model\Store;
+
 interface ModelInterface extends \Peroks\Model\ModelInterface {
 
 	/**

@@ -1,9 +1,4 @@
-<?php declare( strict_types = 1 ); namespace Peroks\Model\Store;
-
-use Peroks\Model\Property;
-use Peroks\Model\PropertyItem;
-use Peroks\Model\PropertyType;
-
+<?php
 /**
  * Utility and helper class.
  *
@@ -11,6 +6,14 @@ use Peroks\Model\PropertyType;
  * @copyright Per Egil Roksvaag
  * @license MIT
  */
+
+declare( strict_types = 1 );
+namespace Peroks\Model\Store;
+
+use Peroks\Model\Property;
+use Peroks\Model\PropertyItem;
+use Peroks\Model\PropertyType;
+
 class Utils extends \Peroks\Model\Utils {
 
 	/**

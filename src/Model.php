@@ -1,5 +1,4 @@
-<?php declare( strict_types = 1 ); namespace Peroks\Model\Store;
-
+<?php
 /**
  * The store model class.
  *
@@ -7,6 +6,10 @@
  * @copyright Per Egil Roksvaag
  * @license MIT
  */
+
+declare( strict_types = 1 );
+namespace Peroks\Model\Store;
+
 class Model extends \Peroks\Model\Model implements ModelInterface {
 
 	/**

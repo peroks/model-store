@@ -1,4 +1,16 @@
-<?php declare( strict_types = 1 ); namespace Peroks\Model\Store;
+<?php
+/**
+ * Class for storing and retrieving models from a SQL database.
+ *
+ * @author Per Egil Roksvaag
+ * @copyright Per Egil Roksvaag
+ * @license MIT
+ *
+ * @noinspection PhpComposerExtensionStubsInspection, SqlDialectInspection
+ */
+
+declare( strict_types = 1 );
+namespace Peroks\Model\Store;
 
 use PDO, PDOException, PDOStatement;
 use Peroks\Model\ModelData;
@@ -7,17 +19,10 @@ use Peroks\Model\PropertyItem;
 use Peroks\Model\PropertyType;
 use Throwable;
 
-/**
- * Class for storing and retrieving models from a SQL database.
- *
- * @author Per Egil Roksvaag
- * @copyright Per Egil Roksvaag
- * @license MIT
- */
 class PdoStore implements StoreInterface {
 
 	/**
-	 * @var PDO|object $db The database object.
+	 * @var object<PDO|> $db The database object.
 	 */
 	protected object $db;
 
@@ -115,7 +120,7 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @param string $query A valid sql statement template.
 	 *
-	 * @return PDOStatement|object A prepared query object.
+	 * @return object<PDOStatement> A prepared query object.
 	 */
 	protected function prepare( string $query ): object {
 		return $this->db->prepare( $query );
@@ -124,7 +129,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Executes a prepared select query and returns the result.
 	 *
-	 * @param PDOStatement|object $prepared A prepared query object.
+	 * @param object<PDOStatement> $prepared A prepared query object.
 	 * @param array $values Query parameter values.
 	 *
 	 * @return array[] An array of database rows.
@@ -137,7 +142,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Executes a prepared insert, update or delete query and returns the number of affected rows.
 	 *
-	 * @param PDOStatement|object $prepared A prepared query object.
+	 * @param object<PDOStatement> $prepared A prepared query object.
 	 * @param array $values Query parameter values.
 	 *
 	 * @return int The number of updated rows.
@@ -203,7 +208,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Checks if a model with the given id exists in the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param int|string $id The model id.
 	 *
 	 * @return bool True if the model exists, false otherwise.
@@ -217,7 +222,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Gets a model matching the given id from the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param int|string $id The model id.
 	 *
 	 * @return ModelInterface|null The matching model or null if not found.
@@ -237,7 +242,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Gets a list of models matching the given ids from the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param int[]|string[] $ids An array of model ids.
 	 *
 	 * @return ModelInterface[] An array of matching models.
@@ -254,7 +259,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Gets a filtered list of models from the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param array $filter Key/value pairs to match model property values.
 	 *
 	 * @return ModelInterface[] An array of models.
@@ -274,7 +279,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Gets all models of the given class in the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 *
 	 * @return ModelInterface[] An array of models.
 	 */
@@ -337,7 +342,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Deletes a model from the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param int|string $id The model id.
 	 *
 	 * @return bool True if the model existed, false otherwise.
@@ -358,7 +363,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Deletes a model from the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param int|string $id The model id.
 	 *
 	 * @return bool True if the model existed, false otherwise.
@@ -522,7 +527,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Generates a query to create a database table for the given model.
 	 *
-	 * @param ModelInterface|string $class The model to create a database table for.
+	 * @param class-string<ModelInterface> $class The model to create a database table for.
 	 *
 	 * @return string A query to create a database table.
 	 */
@@ -558,7 +563,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Creates a database table for the given model.
 	 *
-	 * @param ModelInterface|string $class The model to create a database table for.
+	 * @param class-string<ModelInterface> $class The model to create a database table for.
 	 *
 	 * @return int The number of created database tables.
 	 */
@@ -570,7 +575,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Generates a query to alter a database table to fit the given model.
 	 *
-	 * @param ModelInterface|string $class The model to alter a database table for.
+	 * @param class-string<ModelInterface> $class The model to alter a database table for.
 	 *
 	 * @return string A query to alter a database table.
 	 */
@@ -617,7 +622,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Alters a database table to match the given model.
 	 *
-	 * @param ModelInterface|string $class The model to alter a database table for.
+	 * @param class-string<ModelInterface> $class The model to alter a database table for.
 	 *
 	 * @return int The number of altered database tables.
 	 */
@@ -718,7 +723,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Gets column definitions for the given model.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 *
 	 * @return array[] An array of column definition.
 	 */
@@ -813,7 +818,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Calculates the delta between old and new columns for the given model.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 *
 	 * @return array[] An array of column deltas: drop, alter and create.
 	 */
@@ -929,7 +934,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Gets index definitions for the given model.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 *
 	 * @return array[] An array of index definitions.
 	 */
@@ -981,7 +986,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Calculates the delta between old and new indexes for the given model.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 *
 	 * @return array[] An array of index deltas: drop, alter and create.
 	 */
@@ -1049,7 +1054,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Generates queries to alter foreign keys to fit the given model.
 	 *
-	 * @param ModelInterface|string $class The model alter foreign keys for.
+	 * @param class-string<ModelInterface> $class The model alter foreign keys for.
 	 *
 	 * @return string[] Queries to alter foreign keys.
 	 */
@@ -1084,9 +1089,9 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Alters foreign keys to fit the given model.
 	 *
-	 * @param ModelInterface|string $class The model alter foreign keys for.
+	 * @param class-string<ModelInterface> $class The model alter foreign keys for.
 	 *
-	 * @return bool True if any foreign keys were altered, false otherwise..
+	 * @return bool True if any foreign keys were altered, false otherwise.
 	 */
 	protected function alterForeign( string $class, $create = true ): bool {
 		$count = 0;
@@ -1165,7 +1170,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Gets foreign key definitions for the given model.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 *
 	 * @return array[] An array of foreign key definitions.
 	 */
@@ -1196,7 +1201,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Calculates the delta between old and new foreign keys for the given model.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 *
 	 * @return array[] An array of index deltas: drop and create.
 	 */
@@ -1232,7 +1237,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Gets the relation name for a model property.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param string $id The model property id.
 	 *
 	 * @return string A pseudo-class name for the relation.
@@ -1277,8 +1282,8 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Enqueues a relation table to be created.
 	 *
-	 * @param ModelInterface|string $parent The parent model class name.
-	 * @param ModelInterface|string $child The child model class name.
+	 * @param class-string<ModelInterface> $parent The parent model class name.
+	 * @param class-string<ModelInterface> $child The child model class name.
 	 * @param string $id The property id containing the child models.
 	 *
 	 * @return bool True if the relation table can be created, false otherwise.
@@ -1371,8 +1376,8 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Generates a query for selecting child models.
 	 *
-	 * @param ModelInterface|string $parent The parent model class name.
-	 * @param ModelInterface|string $child The child model class name.
+	 * @param class-string<ModelInterface> $parent The parent model class name.
+	 * @param class-string<ModelInterface> $child The child model class name.
 	 * @param string $id The property id containing the child models.
 	 * @param mixed $value The parent model id.
 	 *
@@ -1403,11 +1408,11 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Gets a prepared query for selecting child models.
 	 *
-	 * @param ModelInterface|string $parent The parent model class name.
-	 * @param ModelInterface|string $child The child model class name.
+	 * @param class-string<ModelInterface> $parent The parent model class name.
+	 * @param class-string<ModelInterface> $child The child model class name.
 	 * @param string $id The property id containing the child models.
 	 *
-	 * @return PDOStatement|object A prepared query object.
+	 * @return object<PDOStatement> A prepared query object.
 	 */
 	protected function selectChildrenStatement( string $parent, string $child, string $id ): object {
 		$relation = $this->getRelationName( $parent, $id );
@@ -1442,7 +1447,7 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @param string $table The relation table name.
 	 *
-	 * @return PDOStatement|object A prepared query object.
+	 * @return object<PDOStatement> A prepared query object.
 	 */
 	protected function selectRelationStatement( string $table ): object {
 		if ( empty( $this->queries[ $table ]['select'] ) ) {
@@ -1457,7 +1462,7 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @param string $table The relation table name.
 	 *
-	 * @return PDOStatement|object A prepared query object.
+	 * @return object<PDOStatement> A prepared query object.
 	 */
 	protected function deleteRelationStatement( string $table ): object {
 		if ( empty( $this->queries[ $table ]['delete'] ) ) {
@@ -1472,7 +1477,7 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @param string $table The relation table name.
 	 *
-	 * @return PDOStatement|object A prepared query object.
+	 * @return object<PDOStatement> A prepared query object.
 	 */
 	protected function insertRelationStatement( string $table ): object {
 		if ( empty( $this->queries[ $table ]['insert'] ) ) {
@@ -1554,9 +1559,9 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Gets a prepared statement to check if a model exists.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 *
-	 * @return PDOStatement|object A prepared query object.
+	 * @return object<PDOStatement> A prepared query object.
 	 */
 	protected function existsRowStatement( string $class ): object {
 		$table = $this->getTableName( $class );
@@ -1588,9 +1593,9 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Gets a prepared query for selecting a single model from the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 *
-	 * @return PDOStatement|object A prepared query object.
+	 * @return object<PDOStatement> A prepared query object.
 	 */
 	protected function selectRowStatement( string $class ): object {
 		$table = $this->getTableName( $class );
@@ -1627,10 +1632,10 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Gets a prepared query for selecting a list of models from the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param string[]|int[] $values An array of model ids to select.
 	 *
-	 * @return PDOStatement|object A prepared query object.
+	 * @return object<PDOStatement> A prepared query object.
 	 */
 	protected function listRowsStatement( string $class, array $values ): object {
 		$table   = $this->getTableName( $class );
@@ -1662,10 +1667,10 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Gets a prepared query for a filtered list of models from the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param array $filter Key/value pairs to match model property values.
 	 *
-	 * @return PDOStatement|object A prepared query object.
+	 * @return object<PDOStatement> A prepared query object.
 	 */
 	protected function filterRowsStatement( string $class, array $filter ): object {
 		$table = $this->getTableName( $class );
@@ -1688,9 +1693,9 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Gets a prepared query for selecting all models of the given class name.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 *
-	 * @return PDOStatement|object A prepared query object.
+	 * @return object<PDOStatement> A prepared query object.
 	 */
 	protected function allRowsStatement( string $class ): object {
 		$table = $this->getTableName( $class );
@@ -1732,9 +1737,9 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Gets a prepared query for adding a model to the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 *
-	 * @return PDOStatement|object A prepared query object.
+	 * @return object<PDOStatement> A prepared query object.
 	 */
 	protected function insertRowStatement( string $class ): object {
 		$table = $this->getTableName( $class );
@@ -1782,9 +1787,9 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Gets a prepared a query for updating a model.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 *
-	 * @return PDOStatement|object A prepared query object.
+	 * @return object<PDOStatement> A prepared query object.
 	 */
 	protected function updateRowStatement( string $class ): object {
 		$table = $this->getTableName( $class );
@@ -1818,9 +1823,9 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Gets a prepared query for deleting a model from the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 *
-	 * @return PDOStatement|object A prepared query object.
+	 * @return object<PDOStatement> A prepared query object.
 	 */
 	protected function deleteRowStatement( string $class ): object {
 		$table = $this->getTableName( $class );
@@ -1840,7 +1845,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Gets the table name corresponding to the given model.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 *
 	 * @return string The corresponding table name.
 	 */
@@ -1969,7 +1974,7 @@ class PdoStore implements StoreInterface {
 	/**
 	 * Completely restores an array of models including all sub-models.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param ModelInterface[]|array[] $models An array of models of the given class.
 	 *
 	 * @return array An array of completely restored models.

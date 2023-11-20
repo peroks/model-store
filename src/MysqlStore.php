@@ -1,4 +1,16 @@
-<?php declare( strict_types = 1 ); namespace Peroks\Model\Store;
+<?php
+/**
+ * Class for storing and retrieving models from a SQL database.
+ *
+ * @author Per Egil Roksvaag
+ * @copyright Per Egil Roksvaag
+ * @license MIT
+ *
+ * @noinspection PhpComposerExtensionStubsInspection, SqlDialectInspection
+ */
+
+declare( strict_types = 1 );
+namespace Peroks\Model\Store;
 
 use Generator;
 use mysqli, mysqli_sql_exception;
@@ -15,7 +27,7 @@ use Peroks\Model\PropertyType;
 class MysqlStore extends PdoStore implements StoreInterface {
 
 	/**
-	 * @var mysqli|object $db The database object.
+	 * @var object<mysqli> $db The database object.
 	 */
 	protected object $db;
 
@@ -29,11 +41,12 @@ class MysqlStore extends PdoStore implements StoreInterface {
 	 * @param object $connect Connections parameters: host, user, pass, name, port, socket.
 	 *
 	 * @return bool True on success, null on failure to create a connection.
+	 * @noinspection PhpUnreachableStatementInspection
 	 */
 	protected function connect( object $connect ): bool {
 		mysqli_report( MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT );
 
-		// Delete database.
+		// Delete database, for debugging purposes only.
 		if ( false ) {
 			$db = new mysqli( $connect->host, $connect->user, $connect->pass );
 			$db->real_query( $this->dropDatabaseQuery( $connect->name ) );
@@ -247,7 +260,7 @@ class MysqlStore extends PdoStore implements StoreInterface {
 	/**
 	 * Completely restores an array of models including all sub-models.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param ModelInterface[]|array[] $models An array of models of the given class.
 	 *
 	 * @return array An array of completely restored models.

@@ -1,11 +1,4 @@
-<?php declare( strict_types = 1 );
-
-namespace Peroks\Model\Store;
-
-use Peroks\Model\ModelData;
-use Peroks\Model\PropertyItem;
-use Peroks\Model\PropertyType;
-
+<?php
 /**
  * Class for storing and retrieving models from a JSON data store.
  *
@@ -13,23 +6,36 @@ use Peroks\Model\PropertyType;
  * @copyright Per Egil Roksvaag
  * @license MIT
  */
+
+declare( strict_types = 1 );
+namespace Peroks\Model\Store;
+
+use Peroks\Model\ModelData;
+use Peroks\Model\PropertyItem;
+use Peroks\Model\PropertyType;
+
 class JsonStore implements StoreInterface {
+
 	/**
 	 * @var array Stored data.
 	 */
 	protected array $data = [];
+
 	/**
 	 * @var array Changed data
 	 */
 	protected array $changed = [];
+
 	/**
 	 * @var array Deleted models
 	 */
 	protected array $deleted = [];
+
 	/**
 	 * @var object Global options.
 	 */
 	protected object $options;
+
 	/**
 	 * @var string JSON source file.
 	 */
@@ -60,7 +66,7 @@ class JsonStore implements StoreInterface {
 	/**
 	 * Checks if a model with the given id exists in the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param int|string $id The model id.
 	 *
 	 * @return bool True if the model exists, false otherwise.
@@ -73,7 +79,7 @@ class JsonStore implements StoreInterface {
 	/**
 	 * Gets a model matching the given id from the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param int|string $id The model id.
 	 *
 	 * @return ModelInterface|null The matching model or null if not found.
@@ -90,7 +96,7 @@ class JsonStore implements StoreInterface {
 	/**
 	 * Gets a list of models matching the given ids from the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param int[]|string[] $ids An array of model ids.
 	 *
 	 * @return ModelInterface[] An array of matching models.
@@ -105,7 +111,7 @@ class JsonStore implements StoreInterface {
 	/**
 	 * Gets a filtered list of models from the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param array $filter Properties (key/value pairs) to match the stored models.
 	 *
 	 * @return ModelInterface[] An array of models.
@@ -125,7 +131,7 @@ class JsonStore implements StoreInterface {
 	/**
 	 * Gets all models of the given class in the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 *
 	 * @return ModelInterface[] An array of models.
 	 */
@@ -163,7 +169,7 @@ class JsonStore implements StoreInterface {
 	/**
 	 * Deletes a model from the data store.
 	 *
-	 * @param ModelInterface|string $class The model class name.
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param int|string $id The model id.
 	 *
 	 * @return bool True if the model existed, false otherwise.
@@ -185,10 +191,10 @@ class JsonStore implements StoreInterface {
 	/**
 	 * Replaces sum-model ids with the sub-model itself.
 	 *
-	 * @param ModelInterface|string $class The class name to join.
+	 * @param class-string<ModelInterface> $class The class name to join.
 	 * @param array $data The model data.
 	 */
-	protected function join( ModelInterface | string $class, array $data ): array {
+	protected function join( string $class, array $data ): array {
 		$properties = $class::properties();
 
 		foreach ( $data as $key => &$value ) {
