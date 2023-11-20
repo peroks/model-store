@@ -192,7 +192,7 @@ class Cache implements StoreInterface {
 	 *
 	 * @return ModelInterface|null The cached model.
 	 */
-	protected function setCache( ModelInterface | null $model ): ModelInterface | null {
+	public function setCache( ModelInterface | null $model ): ModelInterface | null {
 		if ( $model ) {
 			$this->cache[ $model::class ][ $model->id() ] = (string) $model;
 			return $model;
