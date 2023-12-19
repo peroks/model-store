@@ -117,15 +117,17 @@ class JsonStore implements StoreInterface {
 	 * @return ModelInterface[] An array of models.
 	 */
 	public function filter( string $class, array $filter = [] ): array {
-		$all = $this->all( $class );
+		$result = array_replace( $this->data[ $class ] ?? [], $this->changed[ $class ] ?? [] );
 
-		if ( empty( $filter ) ) {
-			return $all;
+		if ( $filter ) {
+			$result = array_filter( $result, function( array $data ) use ( $filter ): bool {
+				return array_intersect_assoc( $filter, $data ) === $filter;
+			} );
 		}
 
-		return array_filter( $all, function( ModelInterface $model ) use ( $filter ): bool {
-			return array_intersect_assoc( $filter, $model->data() ) === $filter;
-		} );
+		return array_map( function( array $data ) use ( $class ): ModelInterface {
+			return new $class( $this->join( $class, $data ) );
+		}, $result );
 	}
 
 	/**
@@ -136,12 +138,11 @@ class JsonStore implements StoreInterface {
 	 * @return ModelInterface[] An array of models.
 	 */
 	public function all( string $class ): array {
-		$all = array_replace( $this->data[ $class ] ?? [], $this->changed[ $class ] ?? [] );
+		$result = array_replace( $this->data[ $class ] ?? [], $this->changed[ $class ] ?? [] );
 
 		return array_map( function( array $data ) use ( $class ): ModelInterface {
-			$data = $this->join( $class, $data );
-			return new $class( $data );
-		}, $all );
+			return new $class( $this->join( $class, $data ) );
+		}, $result );
 	}
 
 	/* -------------------------------------------------------------------------
