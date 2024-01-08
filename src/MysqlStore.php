@@ -116,6 +116,7 @@ class MysqlStore extends PdoStore implements StoreInterface {
 	 * @return array[] An array of database rows.
 	 */
 	protected function select( object $prepared, array $values = [] ): array {
+		$values = array_filter( $values, 'is_scalar' );
 		static::bindParams( $prepared, $values );
 		$prepared->query->execute();
 		return $prepared->query->get_result()->fetch_all( MYSQLI_ASSOC );
@@ -181,7 +182,11 @@ class MysqlStore extends PdoStore implements StoreInterface {
 	 * @return mixed A safe variable to be used in a sql statement.
 	 */
 	protected function escape( mixed $value ): mixed {
-		return is_string( $value ) ? "'" . $this->db->real_escape_string( $value ) . "'" : $value;
+		return match ( true ) {
+			is_string( $value ) => "'" . $this->db->real_escape_string( $value ) . "'",
+			is_array( $value )  => join( ', ', array_map( [ $this, 'escape' ], $value ) ),
+			default             => $value,
+		};
 	}
 
 	/**
@@ -244,7 +249,7 @@ class MysqlStore extends PdoStore implements StoreInterface {
 			foreach ( $params as $value ) {
 				if ( is_string( $value ) ) {
 					$types .= 's';
-				} elseif ( is_int( $value ) ) {
+				} elseif ( is_int( $value ) || is_bool( $value ) ) {
 					$types .= 'i';
 				} elseif ( is_float( $value ) ) {
 					$types .= 'd';

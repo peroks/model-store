@@ -135,6 +135,7 @@ class PdoStore implements StoreInterface {
 	 * @return array[] An array of database rows.
 	 */
 	protected function select( object $prepared, array $values = [] ): array {
+		$values = array_filter( $values, 'is_scalar' );
 		$prepared->execute( $values );
 		return $prepared->fetchAll( PDO::FETCH_ASSOC );
 	}
@@ -198,7 +199,11 @@ class PdoStore implements StoreInterface {
 	 * @return mixed A safe variable to be used in a sql statement.
 	 */
 	protected function escape( mixed $value ): mixed {
-		return is_string( $value ) ? $this->db->quote( $value ) : $value;
+		return match ( true ) {
+			is_string( $value ) => $this->db->quote( $value ),
+			is_array( $value )  => join( ', ', array_map( [ $this, 'escape' ], $value ) ),
+			default             => $value,
+		};
 	}
 
 	/* -------------------------------------------------------------------------
@@ -247,12 +252,11 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @return ModelInterface[] An array of matching models.
 	 */
-	public function list( string $class, array $ids ): array {
+	public function list( string $class, array $ids = [] ): array {
 		$query = $this->listRowsStatement( $class, $ids );
 		$rows  = $this->select( $query, array_values( $ids ) );
+		$rows  = array_map( fn( array $row ) => new $class( $row ), $rows );
 
-		// Convert table rows to models.
-		array_walk( $rows, fn( &$row ) => $row = new $class( $row ) );
 		return static::restoreMulti( $class, $rows );
 	}
 
@@ -265,30 +269,10 @@ class PdoStore implements StoreInterface {
 	 * @return ModelInterface[] An array of models.
 	 */
 	public function filter( string $class, array $filter = [] ): array {
-		$query = $filter
-			? $this->filterRowsStatement( $class, $filter )
-			: $this->allRowsStatement( $class );
+		$query = $this->filterRowsStatement( $class, $filter );
+		$rows  = $this->select( $query, $filter );
+		$rows  = array_map( fn( array $row ) => new $class( $row ), $rows );
 
-		$rows = $this->select( $query, $filter );
-
-		// Convert table rows to models.
-		array_walk( $rows, fn( &$row ) => $row = new $class( $row ) );
-		return static::restoreMulti( $class, $rows );
-	}
-
-	/**
-	 * Gets all models of the given class in the data store.
-	 *
-	 * @param class-string<ModelInterface> $class The model class name.
-	 *
-	 * @return ModelInterface[] An array of models.
-	 */
-	public function all( string $class ): array {
-		$query = $this->allRowsStatement( $class );
-		$rows  = $this->select( $query );
-
-		// Convert table rows to models.
-		array_walk( $rows, fn( &$row ) => $row = new $class( $row ) );
 		return static::restoreMulti( $class, $rows );
 	}
 
@@ -1385,20 +1369,12 @@ class PdoStore implements StoreInterface {
 	 */
 	protected function selectChildrenQuery( string $parent, string $child, string $id, mixed $value = null ): string {
 		$relation = $this->getRelationName( $parent, $id );
-		$table    = $this->getTableName( $relation );
+		$table    = $this->name( $this->getTableName( $relation ) );
+		$source   = $this->name( $this->getTableName( $child ) );
+		$primary  = $this->name( $child::idProperty() );
+		$value    = isset( $value ) ? $this->escape( $value ) : '?';
 
-		$name    = $this->name( $table );
-		$source  = $this->name( $this->getTableName( $child ) );
-		$primary = $this->name( $child::idProperty() );
-
-		if ( isset( $value ) ) {
-			$func  = fn( $item ) => isset( $item ) ? $this->escape( $item ) : '?';
-			$value = join( ', ', array_map( $func, (array) $value ) );
-		} else {
-			$value = '?';
-		}
-
-		$sql[] = "SELECT R._parent, C.* FROM {$name} as R JOIN {$source} as C";
+		$sql[] = "SELECT R._parent, C.* FROM {$table} as R JOIN {$source} as C";
 		$sql[] = "ON R._child = C.{$primary} WHERE R._parent IN( {$value} )";
 		$sql[] = "ORDER BY R._order ASC";
 
@@ -1613,19 +1589,19 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @param string $table The table name.
 	 * @param string $primary The name of the primary key column.
-	 * @param string[]|int[] $values An array of model ids to select.
+	 * @param string[]|int[] $ids An array of model ids to select.
 	 *
 	 * @return string A query for selecting a list of models.
 	 */
-	protected function listRowsQuery( string $table, string $primary, array $values ): string {
-		$table   = $this->name( $table );
-		$primary = $this->name( $primary );
+	protected function listRowsQuery( string $table, string $primary, array $ids ): string {
+		$table = $this->name( $table );
 
-		foreach ( $values as &$value ) {
-			$value = isset( $value ) ? $this->escape( $value ) : '?';
+		if ( empty( $ids ) ) {
+			return "SELECT * FROM {$table}";
 		}
 
-		$values = join( ', ', $values );
+		$primary = $this->name( $primary );
+		$values  = $this->escape( $ids );
 		return "SELECT * FROM {$table} WHERE {$primary} IN ({$values})";
 	}
 
@@ -1633,14 +1609,14 @@ class PdoStore implements StoreInterface {
 	 * Gets a prepared query for selecting a list of models from the data store.
 	 *
 	 * @param class-string<ModelInterface> $class The model class name.
-	 * @param string[]|int[] $values An array of model ids to select.
+	 * @param string[]|int[] $ids An array of model ids to select.
 	 *
 	 * @return object<PDOStatement> A prepared query object.
 	 */
-	protected function listRowsStatement( string $class, array $values ): object {
+	protected function listRowsStatement( string $class, array $ids ): object {
 		$table   = $this->getTableName( $class );
 		$primary = $class::idProperty();
-		$query   = $this->listRowsQuery( $table, $primary, $values );
+		$query   = $this->listRowsQuery( $table, $primary, $ids );
 
 		return $this->prepare( $query );
 	}
@@ -1654,13 +1630,25 @@ class PdoStore implements StoreInterface {
 	 * @return string A query for a filtered list of models.
 	 */
 	protected function filterRowsQuery( string $table, array $filter ): string {
-		foreach ( $filter as $key => &$value ) {
-			$value = sprintf( '(%s = :%s)', $this->name( $key ), $key );
+		$table = $this->name( $table );
+
+		if ( empty( $filter ) ) {
+			return "SELECT * FROM {$table}";
 		}
 
-		$table = $this->name( $table );
-		$sql   = join( ' AND ', $filter );
+		$sql = array_map( function( string $key, mixed $value ): string {
+			return match ( true ) {
+				is_scalar( $value )     => sprintf( '(%s = :%s)', $this->name( $key ), $key ),
+				is_array( $value )      => sprintf( '(%s IN (%s))', $this->name( $key ), $this->escape( $value ) ),
+				$value instanceof Range => sprintf( '(%s BETWEEN %s AND %s)',
+					$this->name( $key ),
+					$this->escape( $value->from ),
+					$this->escape( $value->to )
+				),
+			};
+		}, array_keys( $filter ), $filter );
 
+		$sql = join( ' AND ', $sql );
 		return "SELECT * FROM {$table} WHERE {$sql}";
 	}
 
@@ -1676,35 +1664,6 @@ class PdoStore implements StoreInterface {
 		$table = $this->getTableName( $class );
 		$query = $this->filterRowsQuery( $table, $filter );
 		return $this->prepare( $query );
-	}
-
-	/**
-	 * Generates a query for selecting all models from the given table name.
-	 *
-	 * @param string $table The table name.
-	 *
-	 * @return string A query for selecting all models.
-	 */
-	protected function allRowsQuery( string $table ): string {
-		$table = $this->name( $table );
-		return "SELECT * FROM {$table}";
-	}
-
-	/**
-	 * Gets a prepared query for selecting all models of the given class name.
-	 *
-	 * @param class-string<ModelInterface> $class The model class name.
-	 *
-	 * @return object<PDOStatement> A prepared query object.
-	 */
-	protected function allRowsStatement( string $class ): object {
-		$table = $this->getTableName( $class );
-
-		if ( empty( $this->queries[ $table ]['all'] ) ) {
-			$query = $this->allRowsQuery( $table );
-			return $this->queries[ $table ]['all'] = $this->prepare( $query );
-		}
-		return $this->queries[ $table ]['all'];
 	}
 
 	/**
@@ -1850,7 +1809,6 @@ class PdoStore implements StoreInterface {
 	 * @return string The corresponding table name.
 	 */
 	protected function getTableName( string $class ): string {
-		$class = str_replace( 'Silverscreen\\', '', $class );
 		return str_replace( '\\', '_', $class );
 	}
 
@@ -2002,16 +1960,17 @@ class PdoStore implements StoreInterface {
 			$primary = $child::idProperty();
 
 			if ( PropertyType::ARRAY === $type ) {
-				$dummy = array_fill( 0, count( $ids ), null );
-
 				if ( $match = $property[ PropertyItem::MATCH ] ?? null ) {
-					$query = $this->listRowsQuery( $this->getTableName( $child ), $match, $dummy );
+					$table  = $this->getTableName( $child );
+					$filter = [ $match => $ids ];
+					$query  = $this->filterRowsQuery( $table, $filter );
 				} else {
-					$match = '_parent';
-					$query = $this->selectChildrenQuery( $class, $child, $id, $dummy );
+					$match  = '_parent';
+					$filter = [ $match => $ids ];
+					$query  = $this->selectChildrenQuery( $class, $child, $id, $filter );
 				}
 
-				foreach ( $this->query( $query, $ids ) as $row ) {
+				foreach ( $this->query( $query, $filter ) as $row ) {
 					$model = $index[ $row[ $match ] ];
 					$sub   = $model[ $id ][] = $children[ $child ][] = new $child( $row );
 				}

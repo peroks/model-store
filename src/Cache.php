@@ -79,11 +79,8 @@ class Cache implements StoreInterface {
 	 *
 	 * @return ModelInterface[] An array of matching models.
 	 */
-	public function list( string $class, array $ids ): array {
-		foreach ( $ids as $id ) {
-			$result[ $id ] = $this->get( $class, $id );
-		}
-		return array_filter( $result ?? [] );
+	public function list( string $class, array $ids = [] ): array {
+		return array_map( [ $this, 'setCache' ], $this->store->list( $class, $ids ) );
 	}
 
 	/**
@@ -96,17 +93,6 @@ class Cache implements StoreInterface {
 	 */
 	public function filter( string $class, array $filter = [] ): array {
 		return array_map( [ $this, 'setCache' ], $this->store->filter( $class, $filter ) );
-	}
-
-	/**
-	 * Gets all models of the given class in the data store and adds them to the cache.
-	 *
-	 * @param class-string<ModelInterface> $class The model class name.
-	 *
-	 * @return ModelInterface[] An array of models.
-	 */
-	public function all( string $class ): array {
-		return array_map( [ $this, 'setCache' ], $this->store->all( $class ) );
 	}
 
 	/* -------------------------------------------------------------------------

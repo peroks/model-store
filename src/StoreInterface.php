@@ -39,15 +39,19 @@ interface StoreInterface {
 	/**
 	 * Gets a list of models matching the given ids from the data store.
 	 *
+	 * If no ids are provided, all models of the given class are returned.
+	 *
 	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param int[]|string[] $ids An array of model ids.
 	 *
 	 * @return ModelInterface[] An array of matching models.
 	 */
-	public function list( string $class, array $ids ): array;
+	public function list( string $class, array $ids = [] ): array;
 
 	/**
 	 * Gets a filtered list of models from the data store.
+	 *
+	 * If no filter is provided, all models of the given class are returned.
 	 *
 	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param array $filter Properties (key/value pairs) to match the stored models.
@@ -55,15 +59,6 @@ interface StoreInterface {
 	 * @return ModelInterface[] An array of models.
 	 */
 	public function filter( string $class, array $filter = [] ): array;
-
-	/**
-	 * Gets all models of the given class in the data store.
-	 *
-	 * @param class-string<ModelInterface> $class The model class name.
-	 *
-	 * @return ModelInterface[] An array of models.
-	 */
-	public function all( string $class ): array;
 
 	/* -------------------------------------------------------------------------
 	 * Updating and deleting models

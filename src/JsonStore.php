@@ -101,11 +101,18 @@ class JsonStore implements StoreInterface {
 	 *
 	 * @return ModelInterface[] An array of matching models.
 	 */
-	public function list( string $class, array $ids ): array {
-		foreach ( $ids as $id ) {
-			$result[ $id ] = $this->get( $class, $id );
+	public function list( string $class, array $ids = [] ): array {
+		$result = array_replace( $this->data[ $class ] ?? [], $this->changed[ $class ] ?? [] );
+
+		if ( $ids ) {
+			$result = array_intersect_key( $result, array_flip( $ids ) );
 		}
-		return array_filter( $result ?? [] );
+
+		$result = array_map( function( array $data ) use ( $class ): ModelInterface {
+			return new $class( $this->join( $class, $data ) );
+		}, $result );
+
+		return array_values( $result );
 	}
 
 	/**
@@ -120,29 +127,33 @@ class JsonStore implements StoreInterface {
 		$result = array_replace( $this->data[ $class ] ?? [], $this->changed[ $class ] ?? [] );
 
 		if ( $filter ) {
-			$result = array_filter( $result, function( array $data ) use ( $filter ): bool {
-				return array_intersect_assoc( $filter, $data ) === $filter;
+			$scalar_filter = array_filter( $filter, 'is_scalar' );
+			$rest_filter   = array_diff_key( $filter, $scalar_filter );
+
+			$result = array_filter( $result, function( array $data ) use ( $scalar_filter, $rest_filter ): bool {
+				if ( $scalar_filter && array_intersect_assoc( $scalar_filter, $data ) !== $scalar_filter ) {
+					return false;
+				}
+				foreach ( $rest_filter as $key => $value ) {
+					if ( is_array( $value ) ) {
+						if ( empty( in_array( $data[ $key ], $value, true ) ) ) {
+							return false;
+						}
+					} elseif ( $value instanceof Range ) {
+						if ( $value->from > $data[ $key ] || $data[ $key ] > $value->to ) {
+							return false;
+						}
+					}
+				}
+				return true;
 			} );
 		}
 
-		return array_map( function( array $data ) use ( $class ): ModelInterface {
+		$result = array_map( function( array $data ) use ( $class ): ModelInterface {
 			return new $class( $this->join( $class, $data ) );
 		}, $result );
-	}
 
-	/**
-	 * Gets all models of the given class in the data store.
-	 *
-	 * @param class-string<ModelInterface> $class The model class name.
-	 *
-	 * @return ModelInterface[] An array of models.
-	 */
-	public function all( string $class ): array {
-		$result = array_replace( $this->data[ $class ] ?? [], $this->changed[ $class ] ?? [] );
-
-		return array_map( function( array $data ) use ( $class ): ModelInterface {
-			return new $class( $this->join( $class, $data ) );
-		}, $result );
+		return array_values( $result );
 	}
 
 	/* -------------------------------------------------------------------------
