@@ -219,7 +219,7 @@ class PdoStore implements StoreInterface {
 	 * @return bool True if the model exists, false otherwise.
 	 */
 	public function has( string $class, int | string $id ): bool {
-		$query  = $this->existsRowStatement( $class );
+		$query  = $this->hasRowStatement( $class );
 		$result = $this->select( $query, [ $id ] );
 		return (bool) $result;
 	}
@@ -233,7 +233,7 @@ class PdoStore implements StoreInterface {
 	 * @return ModelInterface|null The matching model or null if not found.
 	 */
 	public function get( string $class, int | string $id ): ModelInterface | null {
-		$query = $this->selectRowStatement( $class );
+		$query = $this->getRowStatement( $class );
 		$rows  = $this->select( $query, [ $id ] );
 
 		if ( $rows ) {
@@ -253,11 +253,11 @@ class PdoStore implements StoreInterface {
 	 * @return ModelInterface[] An array of matching models.
 	 */
 	public function list( string $class, array $ids = [] ): array {
-		$query = $this->listRowsStatement( $class, $ids );
-		$rows  = $this->select( $query, array_values( $ids ) );
-		$rows  = array_map( fn( array $row ) => new $class( $row ), $rows );
-
-		return static::restoreMulti( $class, $rows );
+		if ( $ids ) {
+			$filter = [ $class::idProperty() => $ids ];
+			return $this->filter( $class, $filter );
+		}
+		return $this->filter( $class );
 	}
 
 	/**
@@ -1524,7 +1524,7 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @return string A query to check if a model exists.
 	 */
-	protected function existsRowQuery( string $table, string $primary, string | int | null $value = null ): string {
+	protected function hasRowQuery( string $table, string $primary, string | int | null $value = null ): string {
 		return vsprintf( 'SELECT 1 FROM %s WHERE %s = %s LIMIT 1', [
 			$this->name( $table ),
 			$this->name( $primary ),
@@ -1539,11 +1539,11 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @return object<PDOStatement> A prepared query object.
 	 */
-	protected function existsRowStatement( string $class ): object {
+	protected function hasRowStatement( string $class ): object {
 		$table = $this->getTableName( $class );
 
 		if ( empty( $this->queries[ $table ]['exists'] ) ) {
-			$query = $this->existsRowQuery( $table, $class::idProperty() );
+			$query = $this->hasRowQuery( $table, $class::idProperty() );
 			return $this->queries[ $table ]['exists'] = $this->prepare( $query );
 		}
 		return $this->queries[ $table ]['exists'];
@@ -1558,7 +1558,7 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @return string A query for selecting a single model.
 	 */
-	protected function selectRowQuery( string $table, string $primary, string | int | null $value = null ): string {
+	protected function getRowQuery( string $table, string $primary, string | int | null $value = null ): string {
 		return vsprintf( 'SELECT * FROM %s WHERE %s = %s', [
 			$this->name( $table ),
 			$this->name( $primary ),
@@ -1573,52 +1573,15 @@ class PdoStore implements StoreInterface {
 	 *
 	 * @return object<PDOStatement> A prepared query object.
 	 */
-	protected function selectRowStatement( string $class ): object {
+	protected function getRowStatement( string $class ): object {
 		$table = $this->getTableName( $class );
 
 		if ( empty( $this->queries[ $table ]['select'] ) ) {
 			$primary = $class::idProperty();
-			$query   = $this->selectRowQuery( $table, $primary );
+			$query   = $this->getRowQuery( $table, $primary );
 			return $this->queries[ $table ]['select'] = $this->prepare( $query );
 		}
 		return $this->queries[ $table ]['select'];
-	}
-
-	/**
-	 * Generates a query for selecting a list of models from the data store.
-	 *
-	 * @param string $table The table name.
-	 * @param string $primary The name of the primary key column.
-	 * @param string[]|int[] $ids An array of model ids to select.
-	 *
-	 * @return string A query for selecting a list of models.
-	 */
-	protected function listRowsQuery( string $table, string $primary, array $ids ): string {
-		$table = $this->name( $table );
-
-		if ( empty( $ids ) ) {
-			return "SELECT * FROM {$table}";
-		}
-
-		$primary = $this->name( $primary );
-		$values  = $this->escape( $ids );
-		return "SELECT * FROM {$table} WHERE {$primary} IN ({$values})";
-	}
-
-	/**
-	 * Gets a prepared query for selecting a list of models from the data store.
-	 *
-	 * @param class-string<ModelInterface> $class The model class name.
-	 * @param string[]|int[] $ids An array of model ids to select.
-	 *
-	 * @return object<PDOStatement> A prepared query object.
-	 */
-	protected function listRowsStatement( string $class, array $ids ): object {
-		$table   = $this->getTableName( $class );
-		$primary = $class::idProperty();
-		$query   = $this->listRowsQuery( $table, $primary, $ids );
-
-		return $this->prepare( $query );
 	}
 
 	/**
@@ -1913,7 +1876,7 @@ class PdoStore implements StoreInterface {
 
 			if ( PropertyType::ARRAY === $type ) {
 				if ( $match = $property[ PropertyItem::MATCH ] ?? null ) {
-					$query  = $this->selectRowQuery( $this->getTableName( $child ), $match );
+					$query  = $this->getRowQuery( $this->getTableName( $child ), $match );
 					$select = $this->prepare( $query );
 				} else {
 					$select = $this->selectChildrenStatement( get_class( $model ), $child, $id );
@@ -1982,10 +1945,11 @@ class PdoStore implements StoreInterface {
 					continue;
 				}
 
-				$query = $this->listRowsStatement( $child, $values );
-				$group = Utils::group( $models, $id );
+				$filter = [ $child::idProperty() => $values ];
+				$query  = $this->filterRowsStatement( $child, $filter );
+				$group  = Utils::group( $models, $id );
 
-				foreach ( $this->select( $query ) as $row ) {
+				foreach ( $this->select( $query, $filter ) as $row ) {
 					foreach ( $group[ $row[ $primary ] ] as $model ) {
 						$model[ $id ] = $children[ $child ][] = new $child( $row );
 					}
