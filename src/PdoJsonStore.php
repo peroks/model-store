@@ -197,6 +197,7 @@ class PdoJsonStore implements StoreInterface {
 		return match ( true ) {
 			is_string( $value ) => $this->db->quote( $value ),
 			is_array( $value )  => join( ', ', array_map( [ $this, 'escape' ], $value ) ),
+			is_null( $value )   => 'NULL',
 			default             => $value,
 		};
 	}
@@ -232,7 +233,7 @@ class PdoJsonStore implements StoreInterface {
 		$rows  = $this->select( $query, [ $id ] );
 
 		if ( $rows ) {
-			$data = $this->setModelValues( $class, current( $rows ) );
+			$data = $this->joinModel( $class, current( $rows ) );
 			return new $class( $data );
 		}
 
@@ -268,9 +269,34 @@ class PdoJsonStore implements StoreInterface {
 		$rows  = $this->select( $query, $filter );
 
 		return array_map( function( array $row ) use ( $class ): ModelInterface {
-			$data = $this->setModelValues( $class, $row );
+			$data = $this->joinModel( $class, $row );
 			return new $class( $data );
 		}, $rows );
+	}
+
+	/**
+	 * Replaces sub-model ids with the sub-model itself.
+	 *
+	 * @param class-string<ModelInterface> $class The class name to join.
+	 * @param array $data The model data.
+	 */
+	protected function joinModel( string $class, array $data ): array {
+		$properties = $class::properties();
+
+		foreach ( $data as $key => &$value ) {
+			$property = $properties[ $key ];
+
+			if ( $class = $property[ PropertyItem::MODEL ] ?? null ) {
+				if ( $value && $class::idProperty() ) {
+					$value = match ( $property[ PropertyItem::TYPE ] ) {
+						PropertyType::OBJECT => $this->get( $class, $value ),
+						PropertyType::ARRAY  => $this->list( $class, json_decode( $value, true ) ),
+					};
+				}
+			}
+		}
+
+		return $data;
 	}
 
 	/* -------------------------------------------------------------------------
@@ -289,7 +315,7 @@ class PdoJsonStore implements StoreInterface {
 		$this->beginTransaction();
 
 		try {
-			$this->setInternal( $model );
+			$this->setMulti( [ $model ] );
 			$this->commit();
 		} catch ( Throwable $e ) {
 			$this->rollBack();
@@ -308,16 +334,93 @@ class PdoJsonStore implements StoreInterface {
 	 *
 	 * @return ModelInterface The stored model.
 	 */
-	protected function setInternal( ModelInterface $model ): ModelInterface {
+	protected function setSingle( ModelInterface $model ): ModelInterface {
 		$class = get_class( $model );
 		$query = $this->has( $class, $model->id() )
 			? $this->updateRowStatement( $class )
 			: $this->insertRowStatement( $class );
 
-		$values = $this->getModelValues( $model );
+		$values = $this->splitModel( $model );
 		$rows   = $this->update( $query, $values );
 
 		return $model;
+	}
+
+	/**
+	 * @param ModelInterface[] $models
+	 *
+	 * @return ModelInterface[]
+	 */
+	protected function setMulti( array $models ): array {
+		if ( $models ) {
+			$query = $this->setMultiQuery( $models );
+			$this->exec( $query );
+		}
+		return $models;
+	}
+
+	/**
+	 * Splits a model into separate sub-models and stores them.
+	 *
+	 * @param ModelInterface $model The model instance to be stored.
+	 *
+	 * @return array The model data to be stored on the db.
+	 */
+	protected function splitModel( ModelInterface $model ): array {
+		foreach ( $model::properties() as $id => $property ) {
+			$result[ $id ] = $this->splitModelValue( $model[ $id ], $property );
+		}
+		return $result ?? [];
+	}
+
+	/**
+	 * Gets the value of the given property to be store in a database column.
+	 *
+	 * @param mixed $value The property value.
+	 * @param Property|array $property The model property.
+	 *
+	 * @return mixed A value to be store in a database column.
+	 */
+	protected function splitModelValue( mixed $value, Property | array $property ): mixed {
+		$type  = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
+		$child = $property[ PropertyItem::MODEL ] ?? null;
+
+		// Short-circuit null values.
+		if ( is_null( $value ) ) {
+			return null;
+		}
+
+		// Transform boolean values.
+		if ( is_bool( $value ) ) {
+			return (int) $value;
+		}
+
+		// Transform objects.
+		if ( PropertyType::OBJECT === $type ) {
+			if ( $value instanceof ModelInterface ) {
+				if ( $value::idProperty() ) {
+					return $this->setSingle( $value )->id();
+				}
+				return Utils::encode( $value->data( ModelData::COMPACT ) );
+			}
+			return Utils::encode( $value );
+		}
+
+		// Transform arrays.
+		if ( PropertyType::ARRAY === $type ) {
+			if ( Utils::isModel( $child ) ) {
+				if ( $child::idProperty() ) {
+					$this->setMulti( $value );
+					$callback = fn( $item ) => $item->id();
+				} else {
+					$callback = fn( $item ) => $item->data( ModelData::COMPACT );
+				}
+				return Utils::encode( array_map( $callback, $value ) );
+			}
+			return Utils::encode( $value );
+		}
+
+		return $value;
 	}
 
 	/**
@@ -590,6 +693,44 @@ class PdoJsonStore implements StoreInterface {
 			return $this->queries[ $table ]['update'] = $this->prepare( $query );
 		}
 		return $this->queries[ $table ]['update'];
+	}
+
+	/**
+	 * @param ModelInterface[] $models
+	 *
+	 * @return string
+	 */
+	protected function setMultiQuery( array $models ): string {
+		if ( empty( $model = current( $models ) ) ) {
+			return '';
+		}
+
+		$class      = $model::class;
+		$properties = $model::properties();
+		$columns    = array_map( [ $this, 'name' ], array_keys( $properties ) );
+
+		// Get the escaped values for multiple models.
+		$values = array_map( function( ModelInterface $model ): string {
+			$data = $this->splitModel( $model );
+			return sprintf( '(%s)', $this->escape( $data ) );
+		}, $models );
+
+		// Assign insert values to update columns.
+		// ToDo: This syntax is deprecated beginning with MySQL 8.0.20, use an alias for the value rows instead.
+		$update = array_map( function( string $column ): string {
+			return "{$column}=VALUES({$column})";
+		}, $columns );
+
+		$table   = $this->name( $this->getTableName( $class ) );
+		$columns = join( ', ', $columns );
+		$values  = join( ', ', $values );
+		$update  = join( ', ', $update );
+
+		$sql[] = "INSERT INTO {$table} ({$columns})";
+		$sql[] = "VALUES {$values}";
+		$sql[] = "ON DUPLICATE KEY UPDATE {$update}";
+
+		return join( "\n", $sql );
 	}
 
 	/**
@@ -1450,94 +1591,6 @@ class PdoJsonStore implements StoreInterface {
 	 */
 	protected function getTableName( string $class ): string {
 		return str_replace( '\\', '_', $class );
-	}
-
-	/**
-	 * Gets the model values to be inserted or updated.
-	 *
-	 * @param ModelInterface $model The model instance to be stored.
-	 *
-	 * @return array The model property values as key/value pairs.
-	 */
-	protected function getModelValues( ModelInterface $model ): array {
-		foreach ( $model::properties() as $id => $property ) {
-			$result[ $id ] = $this->getPropertyValue( $model[ $id ], $property );
-		}
-		return $result ?? [];
-	}
-
-	/**
-	 * Gets the value of the given property to be store in a database column.
-	 *
-	 * @param mixed $value The property value.
-	 * @param Property|array $property The model property.
-	 *
-	 * @return mixed A value to be store in a database column.
-	 */
-	protected function getPropertyValue( mixed $value, Property | array $property ): mixed {
-		$type  = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
-		$child = $property[ PropertyItem::MODEL ] ?? null;
-
-		// Short-circuit null values.
-		if ( is_null( $value ) ) {
-			return null;
-		}
-
-		// Transform boolean values.
-		if ( is_bool( $value ) ) {
-			return (int) $value;
-		}
-
-		// Transform objects.
-		if ( PropertyType::OBJECT === $type ) {
-			if ( $value instanceof ModelInterface ) {
-				if ( $value::idProperty() ) {
-					return $this->setInternal( $value )->id();
-				}
-				return Utils::encode( $value->data( ModelData::COMPACT ) );
-			}
-			return Utils::encode( $value );
-		}
-
-		// Transform arrays.
-		if ( PropertyType::ARRAY === $type ) {
-			if ( Utils::isModel( $child ) ) {
-				if ( $child::idProperty() ) {
-					$callback = fn( $item ) => $this->setInternal( $item )->id();
-				} else {
-					$callback = fn( $item ) => $item->data( ModelData::COMPACT );
-				}
-				return Utils::encode( array_map( $callback, $value ) );
-			}
-			return Utils::encode( $value );
-		}
-
-		return $value;
-	}
-
-	/**
-	 * Replaces sum-model ids with the sub-model itself.
-	 *
-	 * @param class-string<ModelInterface> $class The class name to join.
-	 * @param array $data The model data.
-	 */
-	protected function setModelValues( string $class, array $data ): array {
-		$properties = $class::properties();
-
-		foreach ( $data as $key => &$value ) {
-			$property = $properties[ $key ];
-
-			if ( $class = $property[ PropertyItem::MODEL ] ?? null ) {
-				if ( $value && $class::idProperty() ) {
-					$value = match ( $property[ PropertyItem::TYPE ] ) {
-						PropertyType::OBJECT => $this->get( $class, $value ),
-						PropertyType::ARRAY  => $this->list( $class, json_decode( $value, true ) ),
-					};
-				}
-			}
-		}
-
-		return $data;
 	}
 
 	/**
