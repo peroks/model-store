@@ -19,6 +19,6 @@ namespace Peroks\Model\Store;
  * @copyright Per Egil Roksvaag
  * @license MIT
  */
-class MysqlStore extends SqlStore implements StoreInterface {
+class MysqlJsonStore extends SqlJsonStore implements StoreInterface {
 	use MysqlTrait;
 }
