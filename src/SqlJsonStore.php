@@ -1103,6 +1103,14 @@ abstract class SqlJsonStore implements StoreInterface {
 			case PropertyType::TIME:
 				return 'varchar(8)';
 			case PropertyType::OBJECT:
+				if ( $model = $property[ PropertyItem::MODEL ] ?? null ) {
+					if ( $primary = $model::idProperty() ) {
+						if ( $prop = $model::getProperty( $primary ) ) {
+							return $this->getColumnType( $prop );
+						}
+					}
+				}
+				return 'json';
 			case PropertyType::ARRAY:
 				return 'json';
 		}
