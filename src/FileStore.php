@@ -14,7 +14,7 @@ use Peroks\Model\ModelData;
 use Peroks\Model\PropertyItem;
 use Peroks\Model\PropertyType;
 
-class JsonStore implements StoreInterface {
+class FileStore implements StoreInterface {
 
 	/**
 	 * @var array Stored data.
@@ -316,7 +316,7 @@ class JsonStore implements StoreInterface {
 	/**
 	 * Imports data from a source
 	 *
-	 * @param JsonStore|array|string $source The source containing the data to import.
+	 * @param FileStore|array|string $source The source containing the data to import.
 	 */
 	public function import( mixed $source ): void {
 		if ( is_array( $source ) ) {

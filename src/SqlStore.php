@@ -722,7 +722,6 @@ abstract class SqlStore implements StoreInterface {
 				return 'char(36)';
 			case PropertyType::STRING:
 			case PropertyType::URL:
-			case PropertyType::EMAIL:
 				$unique  = $property[ PropertyItem::UNIQUE ] ?? null;
 				$index   = $property[ PropertyItem::INDEX ] ?? null;
 				$default = $property[ PropertyItem::DEFAULT ] ?? null;
@@ -730,6 +729,8 @@ abstract class SqlStore implements StoreInterface {
 				$max     = isset( $unique ) || isset( $index ) || isset( $default ) ? min( 255, $max ) : $max;
 
 				return ( $max <= 255 ) ? sprintf( 'varchar(%d)', $max ) : 'text';
+			case PropertyType::EMAIL:
+				return 'varchar(255)';
 			case PropertyType::DATETIME:
 				return 'varchar(32)';
 			case PropertyType::DATE:
@@ -737,6 +738,14 @@ abstract class SqlStore implements StoreInterface {
 			case PropertyType::TIME:
 				return 'varchar(8)';
 			case PropertyType::OBJECT:
+				if ( $model = $property[ PropertyItem::MODEL ] ?? null ) {
+					if ( $primary = $model::idProperty() ) {
+						if ( $prop = $model::getProperty( $primary ) ) {
+							return $this->getColumnType( $prop );
+						}
+					}
+				}
+				return 'text';
 			case PropertyType::ARRAY:
 				return 'text';
 		}
