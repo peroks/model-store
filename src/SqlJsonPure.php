@@ -338,12 +338,14 @@ abstract class SqlJsonPure implements StoreInterface {
 
 		$class   = $model::class;
 		$columns = array_map( [ $this, 'name' ], [ 'id', 'model' ] );
+		$values  = [];
 
 		// Get the escaped values for multiple models.
-		$values = array_map( function( ModelInterface $model ): string {
-			$data = $this->split( $model );
-			$json = $this->escape( Utils::encode( $data ) );
-			return sprintf( '(%s, %s)', $this->escape( $model->id() ), $json );
+		$insert = array_map( function( ModelInterface $model ) use ( &$values ): string {
+			$data     = $this->split( $model );
+			$values[] = $model->id();
+			$values[] = Utils::encode( $data );
+			return '(?, ?)';
 		}, $models );
 
 		// Assign insert values to update columns.
@@ -354,15 +356,16 @@ abstract class SqlJsonPure implements StoreInterface {
 
 		$table   = $this->name( $this->getTableName( $class ) );
 		$columns = join( ', ', $columns );
-		$values  = join( ', ', $values );
+		$insert  = join( ', ', $insert );
 		$update  = join( ', ', $update );
 
 		$sql[] = "INSERT INTO {$table} ({$columns})";
-		$sql[] = "VALUES {$values}";
+		$sql[] = "VALUES {$insert}";
 		$sql[] = "ON DUPLICATE KEY UPDATE {$update}";
 
-		$query = join( "\n", $sql );
-		$this->exec( $query );
+		$query    = join( "\n", $sql );
+		$prepared = $this->prepare( $query );
+		$this->update( $prepared, $values );
 
 		return $models;
 	}
@@ -403,7 +406,7 @@ abstract class SqlJsonPure implements StoreInterface {
 		if ( empty( $this->prepared[ $table ]['delete'] ) ) {
 			$query = vsprintf( 'DELETE FROM %s WHERE %s = ?', [
 				$this->name( $table ),
-				$this->name( $class::idProperty() ),
+				$this->name( 'id' ),
 			] );
 
 			$this->prepared[ $table ]['delete'] = $this->prepare( $query );
@@ -579,12 +582,17 @@ abstract class SqlJsonPure implements StoreInterface {
 	 */
 	protected function getColumnType( Property | array $property ): string {
 		$type = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
-		$max  = $property[ PropertyItem::MAX ] ?? 255;
+		$max  = max( $property[ PropertyItem::MAX ] ?? 255, 255 );
 
 		return match ( $type ) {
-			PropertyType::UUID    => 'char(36)',
-			PropertyType::INTEGER => 'bigint(20)',
-			PropertyType::STRING  => sprintf( 'varchar(%d)', $max ),
+			PropertyType::UUID     => 'char(36)',
+			PropertyType::INTEGER  => 'bigint(20)',
+			PropertyType::DATETIME => 'varchar(32)',
+			PropertyType::DATE     => 'varchar(16)',
+			PropertyType::TIME     => 'varchar(8)',
+			PropertyType::STRING,
+			PropertyType::URL,
+			PropertyType::EMAIL    => sprintf( 'varchar(%d)', $max ),
 		};
 	}
 
