@@ -255,17 +255,17 @@ abstract class SqlJsonPure implements StoreInterface {
 
 			if ( $scalar_filter ) {
 				$json  = $this->escape( Utils::encode( $scalar_filter ) );
-				$sql[] = sprintf( "JSON_CONTAINS(model, %s)", $json );
+				$sql[] = sprintf( 'JSON_CONTAINS(model, %s)', $json );
 			}
 
 			foreach ( $rest_filter as $key => $value ) {
 				if ( is_array( $value ) ) {
 					// Json values don't support comparison with the "IN" operator.
-					$sql[] = sprintf( "JSON_CONTAINS(JSON_ARRAY(%s), JSON_EXTRACT(model, '$.%s'))", $this->escape( $value ), $key );
+					$sql[] = sprintf( 'JSON_CONTAINS(JSON_ARRAY(%s), JSON_EXTRACT(model, "$.%s"))', $this->escape( $value ), $key );
 				} elseif ( $value instanceof Range ) {
 					// Json values don't support comparison with the "BETWEEN" operator.
-					$sql[] = sprintf( "JSON_EXTRACT(model, '$.%s') >= %s", $key, $this->escape( $value->from ) );
-					$sql[] = sprintf( "JSON_EXTRACT(model, '$.%s') <= %s", $key, $this->escape( $value->to ) );
+					$sql[] = sprintf( 'JSON_EXTRACT(model, "$.%s") >= %s', $key, $this->escape( $value->from ) );
+					$sql[] = sprintf( 'JSON_EXTRACT(model, "$.%s") <= %s', $key, $this->escape( $value->to ) );
 				}
 			}
 		}
@@ -343,7 +343,7 @@ abstract class SqlJsonPure implements StoreInterface {
 		$values = array_map( function( ModelInterface $model ): string {
 			$data = $this->split( $model );
 			$json = $this->escape( Utils::encode( $data ) );
-			return sprintf( "(%s, %s)", $this->escape( $model->id() ), $json );
+			return sprintf( '(%s, %s)', $this->escape( $model->id() ), $json );
 		}, $models );
 
 		// Assign insert values to update columns.
