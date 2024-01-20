@@ -35,6 +35,16 @@ abstract class SqlJsonPure implements StoreInterface {
 	protected array $prepared = [];
 
 	/**
+	 * @var string The column name where the model json is stored.
+	 */
+	protected string $modelColumn = '_model';
+
+	/**
+	 * @var string The db data type for the model column.
+	 */
+	protected string $modelType = 'json';
+
+	/**
 	 * Constructor.
 	 *
 	 * @param array|object $connect Connections parameters: host, user, pass, name, port, socket.
@@ -163,7 +173,7 @@ abstract class SqlJsonPure implements StoreInterface {
 		if ( empty( $this->prepared[ $table ]['has'] ) ) {
 			$query = vsprintf( 'SELECT 1 FROM %s WHERE %s = ? LIMIT 1', [
 				$this->name( $table ),
-				$this->name( 'id' ),
+				$this->name( $class::idProperty() ),
 			] );
 
 			$this->prepared[ $table ]['has'] = $this->prepare( $query );
@@ -190,7 +200,7 @@ abstract class SqlJsonPure implements StoreInterface {
 		if ( empty( $this->prepared[ $table ]['get'] ) ) {
 			$query = vsprintf( 'SELECT * FROM %s WHERE %s = ?', [
 				$this->name( $table ),
-				$this->name( 'id' ),
+				$this->name( $class::idProperty() ),
 			] );
 
 			$this->prepared[ $table ]['get'] = $this->prepare( $query );
@@ -202,7 +212,7 @@ abstract class SqlJsonPure implements StoreInterface {
 
 		if ( $rows ) {
 			$row  = current( $rows );
-			$data = json_decode( $row['model'], true );
+			$data = json_decode( $row[ $this->modelColumn ], true );
 			return $this->join( $class, $data );
 		}
 
@@ -218,24 +228,23 @@ abstract class SqlJsonPure implements StoreInterface {
 	 * @return ModelInterface[] An array of matching models.
 	 */
 	public function list( string $class, array $ids = [] ): array {
+		if ( empty( $ids ) ) {
+			return $this->all( $class );
+		}
+
 		if ( count( $ids ) === 1 ) {
 			$model = $this->get( $class, current( $ids ) );
 			return [ $model ];
 		}
 
-		$table = $this->name( $this->getTableName( $class ) );
-		$query = "SELECT * FROM {$table}";
-
-		if ( $ids ) {
-			$primary = $this->name( 'id' );
-			$values  = join( ', ', array_fill( 0, count( $ids ), '?' ) );
-			$query   = "SELECT * FROM {$table} WHERE {$primary} IN ({$values})";
-		}
-
-		$rows = $this->query( $query, $ids );
+		$table   = $this->name( $this->getTableName( $class ) );
+		$primary = $this->name( $class::idProperty() );
+		$fill    = join( ', ', array_fill( 0, count( $ids ), '?' ) );
+		$query   = "SELECT * FROM {$table} WHERE {$primary} IN ({$fill})";
+		$rows    = $this->query( $query, $ids );
 
 		return array_map( function( array $row ) use ( $class ): ModelInterface {
-			$data = json_decode( $row['model'], true );
+			$data = json_decode( $row[ $this->modelColumn ], true );
 			return $this->join( $class, $data );
 		}, $rows );
 	}
@@ -249,39 +258,88 @@ abstract class SqlJsonPure implements StoreInterface {
 	 * @return ModelInterface[] An array of models.
 	 */
 	public function filter( string $class, array $filter = [] ): array {
-		if ( $filter ) {
-			$scalar_filter = array_filter( $filter, 'is_scalar' );
-			$rest_filter   = array_diff_key( $filter, $scalar_filter );
+		if ( empty( $filter ) ) {
+			return $this->all( $class );
+		}
 
-			if ( $scalar_filter ) {
-				$json  = $this->escape( Utils::encode( $scalar_filter ) );
-				$sql[] = sprintf( 'JSON_CONTAINS(model, %s)', $json );
+		$properties    = array_filter( $class::properties(), [ $this, 'isIndex' ] );
+		$index_filter  = array_intersect_key( $filter, $properties );
+		$json_filter   = array_diff_key( $filter, $index_filter );
+		$scalar_filter = array_filter( $json_filter, 'is_scalar' );
+		$rest_filter   = array_diff_key( $json_filter, $scalar_filter );
+		$values        = [];
+
+		$sql = array_map( function( string $key, mixed $value ) use ( &$values ): string {
+			if ( is_array( $value ) ) {
+				$values += $value;
+				$fill   = join( ', ', array_fill( 0, count( $value ), '?' ) );
+				return sprintf( '(%s IN (%s))', $this->name( $key ), $fill );
 			}
 
-			foreach ( $rest_filter as $key => $value ) {
-				if ( is_array( $value ) ) {
-					// Json values don't support comparison with the "IN" operator.
-					$sql[] = sprintf( 'JSON_CONTAINS(JSON_ARRAY(%s), JSON_EXTRACT(model, "$.%s"))', $this->escape( $value ), $key );
-				} elseif ( $value instanceof Range ) {
-					// Json values don't support comparison with the "BETWEEN" operator.
-					$sql[] = sprintf( 'JSON_EXTRACT(model, "$.%s") >= %s', $key, $this->escape( $value->from ) );
-					$sql[] = sprintf( 'JSON_EXTRACT(model, "$.%s") <= %s', $key, $this->escape( $value->to ) );
-				}
+			if ( $value instanceof Range ) {
+				$values[] = $value->from;
+				$values[] = $value->to;
+				return sprintf( '(%s BETWEEN ? AND ?)', $this->name( $key ) );
+			};
+
+			$values[] = $value;
+			return sprintf( '(%s = ?)', $this->name( $key ) );
+		}, array_keys( $index_filter ), $index_filter );
+
+		if ( $scalar_filter ) {
+			$values[] = Utils::encode( $scalar_filter );
+			$sql[]    = sprintf( 'JSON_CONTAINS(%s, ?)', $this->name( $this->modelColumn ) );
+		}
+
+		foreach ( $rest_filter as $key => $value ) {
+			if ( is_array( $value ) ) {
+				// Json values don't support comparison with the "IN" operator.
+				$sql[] = vsprintf( 'JSON_CONTAINS(JSON_ARRAY(%s), JSON_EXTRACT(%s, "$.%s"))', [
+					$this->escape( $value ),
+					$this->name( $this->modelColumn ),
+					$key,
+				] );
+			} elseif ( $value instanceof Range ) {
+				// Json values don't support comparison with the "BETWEEN" operator.
+				$values[] = $value->from;
+				$values[] = $value->to;
+				$sql[]    = sprintf( 'JSON_EXTRACT(%s, "$.%s") >= ?', $this->name( $this->modelColumn ), $key );
+				$sql[]    = sprintf( 'JSON_EXTRACT(%s, "$.%s") <= ?', $this->name( $this->modelColumn ), $key );
 			}
 		}
 
 		$table = $this->name( $this->getTableName( $class ) );
-		$query = "SELECT * FROM {$table}";
-
-		if ( isset( $sql ) ) {
-			$sql   = join( ' AND ', $sql );
-			$query = "SELECT * FROM {$table} WHERE {$sql}";
-		}
-
-		$rows = $this->query( $query );
+		$sql   = join( ' AND ', $sql );
+		$query = "SELECT * FROM {$table} WHERE {$sql}";
+		$rows  = $this->query( $query, $values );
 
 		return array_map( function( array $row ) use ( $class ): ModelInterface {
-			$data = json_decode( $row['model'], true );
+			$data = json_decode( $row[ $this->modelColumn ], true );
+			return $this->join( $class, $data );
+		}, $rows );
+	}
+
+	/**
+	 * Gets a all of models of the given class from the data store.
+	 *
+	 * @param class-string<ModelInterface> $class The model class name.
+	 *
+	 * @return ModelInterface[] An array of matching models.
+	 */
+	protected function all( string $class ): array {
+		$table = $this->getTableName( $class );
+		$query = sprintf( 'SELECT * FROM %s', $this->name( $table ) );
+
+		// Set prepared query.
+		if ( empty( $this->prepared[ $table ]['all'] ) ) {
+			$this->prepared[ $table ]['all'] = $this->prepare( $query );
+		}
+
+		$prepared = $this->prepared[ $table ]['all'];
+		$rows     = $this->select( $prepared );
+
+		return array_map( function( array $row ) use ( $class ): ModelInterface {
+			$data = json_decode( $row[ $this->modelColumn ], true );
 			return $this->join( $class, $data );
 		}, $rows );
 	}
@@ -336,16 +394,28 @@ abstract class SqlJsonPure implements StoreInterface {
 			return $models;
 		}
 
-		$class   = $model::class;
-		$columns = array_map( [ $this, 'name' ], [ 'id', 'model' ] );
-		$values  = [];
+		$class      = $model::class;
+		$properties = array_filter( $model::properties(), [ $this, 'isIndex' ] );
+		$properties = array_keys( $properties );
+		$columns    = array_map( [ $this, 'name' ], $properties );
+		$columns[]  = $this->name( $this->modelColumn );
+		$values     = [];
 
 		// Get the escaped values for multiple models.
-		$insert = array_map( function( ModelInterface $model ) use ( &$values ): string {
+		$insert = array_map( function( ModelInterface $model ) use ( $properties, &$values ): string {
+			foreach ( $properties as $id ) {
+				$value    = $model[ $id ];
+				$values[] = match ( true ) {
+					is_bool( $value ) => $value ? 1 : 0,
+					default           => $value,
+				};
+				$sql[]    = '?';
+			}
 			$data     = $this->split( $model );
-			$values[] = $model->id();
 			$values[] = Utils::encode( $data );
-			return '(?, ?)';
+			$sql[]    = '?';
+
+			return sprintf( '(%s)', join( ', ', $sql ) );
 		}, $models );
 
 		// Assign insert values to update columns.
@@ -406,7 +476,7 @@ abstract class SqlJsonPure implements StoreInterface {
 		if ( empty( $this->prepared[ $table ]['delete'] ) ) {
 			$query = vsprintf( 'DELETE FROM %s WHERE %s = ?', [
 				$this->name( $table ),
-				$this->name( 'id' ),
+				$this->name( $class::idProperty() ),
 			] );
 
 			$this->prepared[ $table ]['delete'] = $this->prepare( $query );
@@ -508,10 +578,76 @@ abstract class SqlJsonPure implements StoreInterface {
 
 		// Create or alter model tables (columns + indexes).
 		foreach ( $classes as $name ) {
-			$count += $this->createTable( $name );
+			$count += $this->createTable( $name ) ?: $this->alterTable( $name );
 		}
 
 		return $count;
+	}
+
+	/* -------------------------------------------------------------------------
+	 * Show, create and alter tables
+	 * ---------------------------------------------------------------------- */
+
+	/**
+	 * Gets a query to show all tables in the current database.
+	 *
+	 * @return string A query to show all database tables.
+	 */
+	protected function showTablesQuery(): string {
+		return 'SHOW TABLES';
+	}
+
+	/**
+	 * Gets all tables in the current database.
+	 *
+	 * @return array[] An array of all database tables.
+	 */
+	protected function showTables(): array {
+		$query = $this->showTablesQuery();
+		return $this->query( $query );
+	}
+
+	/**
+	 * Gets all tables names in the current database.
+	 *
+	 * @return string[] An array of all database table names.
+	 */
+	protected function showTableNames(): array {
+		foreach ( $this->showTables() as $table ) {
+			$result[] = current( $table );
+		}
+		return $result ?? [];
+	}
+
+	/**
+	 * Generates a query to create a database table for the given model.
+	 *
+	 * @param class-string<ModelInterface> $class The model to create a database table for.
+	 *
+	 * @return string A query to create a database table.
+	 */
+	protected function createTableQuery( string $class ): string {
+		$columns = $this->getModelColumns( $class );
+		$indexes = $this->getModelIndexes( $class );
+
+		// Create columns.
+		foreach ( $columns as $column ) {
+			$sql[] = $this->defineColumnQuery( $column );
+		}
+
+		// Create indexes.
+		foreach ( $indexes as $index ) {
+			$sql[] = $this->defineIndexQuery( $index );
+		}
+
+		if ( isset( $sql ) ) {
+			$sql   = "\n\t" . join( ",\n\t", $sql ) . "\n";
+			$table = $this->name( $this->getTableName( $class ) );
+			return sprintf( 'CREATE TABLE IF NOT EXISTS %s (%s)', $table, $sql );
+		}
+
+		$table = $this->name( $this->getTableName( $class ) );
+		return sprintf( 'CREATE TABLE IF NOT EXISTS %s', $table );
 	}
 
 	/**
@@ -522,40 +658,408 @@ abstract class SqlJsonPure implements StoreInterface {
 	 * @return int The number of created database tables.
 	 */
 	protected function createTable( string $class ): int {
-		$primary  = $class::idProperty();
-		$property = $class::getProperty( $primary );
-		$columns  = [
-			[
-				'name'     => 'id',
-				'type'     => $this->getColumnType( $property ),
-				'required' => true,
-				'primary'  => true,
-			],
-			[
-				'name'     => 'model',
-				'type'     => 'json',
-				'required' => true,
-			],
-		];
+		$query = $this->createTableQuery( $class );
+		return $this->exec( $query );
+	}
+
+	/**
+	 * Generates a query to alter a database table to fit the given model.
+	 *
+	 * @param class-string<ModelInterface> $class The model to alter a database table for.
+	 *
+	 * @return string A query to alter a database table.
+	 */
+	protected function alterTableQuery( string $class ): string {
+		$columns = $this->calcDeltaColumns( $class );
+		$indexes = $this->calcDeltaIndexes( $class );
+
+		// Drop indexes.
+		foreach ( array_keys( $indexes['drop'] ) as $name ) {
+			$sql[] = sprintf( 'DROP INDEX %s', $this->name( $name ) );
+		}
+
+		// Drop columns.
+		foreach ( array_keys( $columns['drop'] ) as $name ) {
+			$sql[] = sprintf( 'DROP COLUMN %s', $this->name( $name ) );
+		}
+
+		// Alter columns.
+		foreach ( $columns['alter'] as $old => $column ) {
+			$sql[] = $old === $column['name']
+				? sprintf( 'MODIFY COLUMN %s', $this->defineColumnQuery( $column ) )
+				: sprintf( 'CHANGE COLUMN %s %s', $this->name( $old ), $this->defineColumnQuery( $column ) );
+		}
 
 		// Create columns.
-		$sql = array_map( function( array $column ): string {
-			$required = $column['required'] ?? false;
-			$primary  = $column['primary'] ?? false;
+		foreach ( $columns['create'] as $column ) {
+			$sql[] = sprintf( 'ADD COLUMN %s', $this->defineColumnQuery( $column ) );
+		}
 
-			return join( ' ', array_filter( [
-				$this->name( $column['name'] ),
-				$column['type'],
-				$required ? 'NOT NULL' : null,
-				$primary ? 'PRIMARY KEY' : null,
-			] ) );
-		}, $columns );
+		// Create indexes.
+		foreach ( $indexes['create'] as $index ) {
+			$sql[] = sprintf( 'ADD %s', $this->defineIndexQuery( $index ) );
+		}
 
-		$sql   = join( ', ', $sql );
-		$table = $this->name( $this->getTableName( $class ) );
-		$query = sprintf( 'CREATE TABLE IF NOT EXISTS %s (%s)', $table, $sql );
+		if ( isset( $sql ) ) {
+			$sql   = "\n" . join( ",\n", $sql );
+			$table = $this->name( $this->getTableName( $class ) );
+			return sprintf( 'ALTER TABLE %s %s', $table, $sql );
+		}
 
-		return $this->exec( $query );
+		return '';
+	}
+
+	/**
+	 * Alters a database table to match the given model.
+	 *
+	 * @param class-string<ModelInterface> $class The model to alter a database table for.
+	 *
+	 * @return int The number of altered database tables.
+	 */
+	protected function alterTable( string $class ): int {
+		if ( $query = $this->alterTableQuery( $class ) ) {
+			return $this->exec( $query );
+		}
+		return 0;
+	}
+
+	/* -------------------------------------------------------------------------
+	 * Show and define table columns.
+	 * ---------------------------------------------------------------------- */
+
+	/**
+	 * Generates a query to show all columns in the given table.
+	 *
+	 * @param string $table The table name.
+	 *
+	 * @return string A query to show all columns in the given table.
+	 */
+	protected function showColumnsQuery( string $table ): string {
+		return sprintf( 'SHOW COLUMNS FROM %s', $this->name( $table ) );
+	}
+
+	/**
+	 * Gets all columns in the given table.
+	 *
+	 * @param string $table The table name.
+	 *
+	 * @return array[] An array of column definitions.
+	 */
+	protected function showColumns( string $table ): array {
+		$query = $this->showColumnsQuery( $table );
+		return $this->query( $query );
+	}
+
+	/**
+	 * Generates a column definition query for the given model property.
+	 *
+	 * @param array $column A table column.
+	 *
+	 * @return string A column definition query.
+	 */
+	protected function defineColumnQuery( array $column ): string {
+		$type     = $column['type'];
+		$required = $column['required'] ?? null;
+		$default  = $column['default'] ?? null;
+
+		// Cast default value.
+		if ( isset( $default ) ) {
+			$default = $this->escape( $default );
+		} elseif ( empty( $required ) && 'TEXT' !== $type ) {
+			$default = 'NULL';
+		}
+
+		return join( ' ', array_filter( [
+			$this->name( $column['name'] ),
+			$type,
+			$required ? 'NOT NULL' : null,
+			isset( $default ) ? "DEFAULT {$default}" : null,
+		] ) );
+	}
+
+	/**
+	 * Gets column definitions for the given table.
+	 *
+	 * @param string $table The table name.
+	 *
+	 * @return array[] An array of column definitions.
+	 */
+	protected function getTableColumns( string $table ): array {
+		$columns = $this->showColumns( $table );
+		$result  = [];
+
+		foreach ( $columns as $column ) {
+			$name    = $column['Field'];
+			$default = $column['Default'];
+
+			// Normalise default values.
+			if ( isset( $default ) ) {
+				if ( 'decimal(32,10)' === $column['Type'] ) {
+					$default = (float) $default;
+				}
+			}
+
+			$result[ $name ] = [
+				'name'     => $name,
+				'type'     => $column['Type'],
+				'required' => $column['Null'] === 'NO',
+				'default'  => $default,
+			];
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Gets column definitions for the given model.
+	 *
+	 * @param class-string<ModelInterface> $class The model class name.
+	 *
+	 * @return array[] An array of column definition.
+	 */
+	protected function getModelColumns( string $class ): array {
+		$properties = $class::properties();
+		$properties = array_filter( $properties, [ $this, 'isIndex' ] );
+
+		$columns = array_map( function( Property | array $property ) use ( $class ): array {
+			$id      = $property[ PropertyItem::ID ];
+			$type    = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
+			$default = $property[ PropertyItem::DEFAULT ] ?? null;
+
+			if ( empty( is_scalar( $default ) ) ) {
+				$default = null;
+			}
+
+			if ( PropertyType::UUID === $type && true === $default ) {
+				$default = null;
+			}
+
+			if ( is_bool( $default ) ) {
+				$default = (int) $default;
+			}
+
+			return [
+				'name'     => $id,
+				'type'     => $this->getColumnType( $property ),
+				'required' => $property[ PropertyItem::REQUIRED ] ?? false,
+				'default'  => $default,
+			];
+		}, $properties );
+
+		$columns[ $this->modelColumn ] = [
+			'name'     => $this->modelColumn,
+			'type'     => $this->modelType,
+			'required' => true,
+			'default'  => null,
+		];
+
+		return $columns;
+	}
+
+	/**
+	 * Gets the correct column data type for the given model property.
+	 *
+	 * @param Property|array $property The model property.
+	 *
+	 * @return string The column data type.
+	 */
+	protected function getColumnType( Property | array $property ): string {
+		$type = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
+		$max  = max( $property[ PropertyItem::MAX ] ?? 255, 255 );
+
+		return match ( $type ) {
+			PropertyType::UUID     => 'char(36)',
+			PropertyType::BOOL     => 'tinyint(1)',
+			PropertyType::INTEGER  => 'bigint(20)',
+			PropertyType::DATETIME => 'varchar(32)',
+			PropertyType::DATE     => 'varchar(16)',
+			PropertyType::TIME     => 'varchar(8)',
+			PropertyType::STRING,
+			PropertyType::URL,
+			PropertyType::EMAIL    => sprintf( 'varchar(%d)', $max ),
+		};
+	}
+
+	/**
+	 * Calculates the delta between old and new columns for the given model.
+	 *
+	 * @param class-string<ModelInterface> $class The model class name.
+	 *
+	 * @return array[] An array of column deltas: drop, alter and create.
+	 */
+	protected function calcDeltaColumns( string $class ): array {
+		$tableColumns = $this->getTableColumns( $this->getTableName( $class ) );
+		$modelColumns = $this->getModelColumns( $class );
+
+		$common = array_intersect_key( $modelColumns, $tableColumns );
+		$drop   = array_diff_key( $tableColumns, $modelColumns );
+		$create = array_diff_key( $modelColumns, $tableColumns );
+		$alter  = [];
+
+		// Get altered columns.
+		foreach ( $common as $name => $column ) {
+			if ( array_diff_assoc( $column, $tableColumns[ $name ] ) ) {
+				$alter[ $name ] = $column;
+			}
+		}
+
+		// Get renamed columns.
+		// There is no safe way to know if a model property was replaced or renamed.
+		// Here we assume that if the column type remains the same, then the property was renamed.
+		foreach ( $create as $name => $modelColumn ) {
+			foreach ( $drop as $old => $tableColumn ) {
+				if ( $modelColumn['type'] === $tableColumn['type'] ) {
+					$alter[ $old ] = $modelColumn;
+					unset( $create[ $name ] );
+					unset( $drop[ $old ] );
+					break;
+				}
+			}
+		}
+
+		return compact( 'drop', 'alter', 'create' );
+	}
+
+	/* -------------------------------------------------------------------------
+	 * Show and define table indexes
+	 * ---------------------------------------------------------------------- */
+
+	/**
+	 * Generates a query to show all indexes on the given table.
+	 *
+	 * @param string $table The table name.
+	 *
+	 * @return string A query to show all indexes on the given table.
+	 */
+	protected function showIndexesQuery( string $table ): string {
+		return sprintf( 'SHOW INDEXES FROM %s', $this->name( $table ) );
+	}
+
+	/**
+	 * Gets all indexes on the given table.
+	 *
+	 * @param string $table The table name.
+	 *
+	 * @return array[] An array of index definitions.
+	 */
+	protected function showIndexes( string $table ): array {
+		$query = $this->showIndexesQuery( $table );
+		return $this->query( $query );
+	}
+
+	/**
+	 * Generates an index definition query for the given index.
+	 *
+	 * @param array $index An index definition.
+	 *
+	 * @return string An index definition query.
+	 */
+	protected function defineIndexQuery( array $index ): string {
+		$name    = $this->name( $index['name'] );
+		$columns = join( ', ', array_map( [ $this, 'name' ], $index['columns'] ) );
+
+		return match ( $index['type'] ?? 'INDEX' ) {
+			'PRIMARY' => sprintf( 'PRIMARY KEY (%s)', $columns ),
+			'UNIQUE'  => sprintf( 'UNIQUE %s (%s)', $name, $columns ),
+			default   => sprintf( 'INDEX %s (%s)', $name, $columns ),
+		};
+	}
+
+	/**
+	 * Gets index definitions for the given table.
+	 *
+	 * @param string $table The table name.
+	 *
+	 * @return array[] An array of index definitions.
+	 */
+	protected function getTableIndexes( string $table ): array {
+		$indexes = $this->showIndexes( $table );
+		$indexes = Utils::group( $indexes, 'Key_name' );
+		$result  = [];
+
+		foreach ( $indexes as $name => $index ) {
+			if ( 'PRIMARY' === $index[0]['Key_name'] ) {
+				$type = 'PRIMARY';
+			} else {
+				$type = $index[0]['Non_unique'] ? 'INDEX' : 'UNIQUE';
+			}
+
+			$result[ $name ] = [
+				'name'    => $name,
+				'type'    => $type,
+				'columns' => array_column( $index, 'Column_name' ),
+			];
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Gets index definitions for the given model.
+	 *
+	 * @param class-string<ModelInterface> $class The model class name.
+	 *
+	 * @return array[] An array of index definitions.
+	 */
+	protected function getModelIndexes( string $class ): array {
+		$properties = $class::properties();
+		$primary    = $class::idProperty();
+		$result     = [];
+
+		// Set primary key.
+		if ( $primary && array_key_exists( $primary, $properties ) ) {
+			$result['PRIMARY'] = [
+				'name'    => 'PRIMARY',
+				'type'    => 'PRIMARY',
+				'columns' => [ $primary ],
+			];
+		}
+
+		foreach ( $properties as $id => $property ) {
+			if ( $name = $property[ PropertyItem::INDEX ] ?? null ) {
+				$result[ $name ]['name']      = $name;
+				$result[ $name ]['type']      = 'INDEX';
+				$result[ $name ]['columns'][] = $id;
+			}
+
+			if ( $name = $property[ PropertyItem::UNIQUE ] ?? null ) {
+				$result[ $name ]['name']      = $name;
+				$result[ $name ]['type']      = 'UNIQUE';
+				$result[ $name ]['columns'][] = $id;
+			}
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Calculates the delta between old and new indexes for the given model.
+	 *
+	 * @param class-string<ModelInterface> $class The model class name.
+	 *
+	 * @return array[] An array of index deltas: drop, alter and create.
+	 */
+	protected function calcDeltaIndexes( string $class ): array {
+		$tableIndexes = $this->getTableIndexes( $this->getTableName( $class ) );
+		$modelIndexes = $this->getModelIndexes( $class );
+
+		$common = array_intersect_key( $modelIndexes, $tableIndexes );
+		$drop   = array_diff_key( $tableIndexes, $modelIndexes );
+		$create = array_diff_key( $modelIndexes, $tableIndexes );
+
+		// Check for differences.
+		foreach ( $common as $name => $modelIndex ) {
+			$tableIndex = $tableIndexes[ $name ];
+			$modelJson  = Utils::encode( $modelIndex );
+			$tableJson  = Utils::encode( $tableIndex );
+
+			if ( $modelJson !== $tableJson ) {
+				$drop[ $name ]   = $tableIndex;
+				$create[ $name ] = $modelIndex;
+			}
+		}
+
+		return compact( 'drop', 'create' );
 	}
 
 	/* -------------------------------------------------------------------------
@@ -573,27 +1077,11 @@ abstract class SqlJsonPure implements StoreInterface {
 		return str_replace( '\\', '_', $class );
 	}
 
-	/**
-	 * Gets the correct column data type for the given model property.
-	 *
-	 * @param Property|array $property The model property.
-	 *
-	 * @return string The column data type.
-	 */
-	protected function getColumnType( Property | array $property ): string {
-		$type = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
-		$max  = max( $property[ PropertyItem::MAX ] ?? 255, 255 );
-
-		return match ( $type ) {
-			PropertyType::UUID     => 'char(36)',
-			PropertyType::INTEGER  => 'bigint(20)',
-			PropertyType::DATETIME => 'varchar(32)',
-			PropertyType::DATE     => 'varchar(16)',
-			PropertyType::TIME     => 'varchar(8)',
-			PropertyType::STRING,
-			PropertyType::URL,
-			PropertyType::EMAIL    => sprintf( 'varchar(%d)', $max ),
-		};
+	protected function isIndex( Property | array $property ): bool {
+		return boolval( $property[ PropertyItem::PRIMARY ]
+			?? $property[ PropertyItem::UNIQUE ]
+			?? $property[ PropertyItem::INDEX ]
+			?? false );
 	}
 
 	/**
@@ -638,6 +1126,10 @@ abstract class SqlJsonPure implements StoreInterface {
 			}
 
 			$property = $properties[ $id ];
+
+			if ( $property[ PropertyType::FUNCTION ] ?? null ) {
+				continue;
+			}
 
 			if ( $class = $property[ PropertyItem::MODEL ] ?? null ) {
 				if ( $class::idProperty() ) {
