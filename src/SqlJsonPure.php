@@ -262,7 +262,7 @@ abstract class SqlJsonPure implements StoreInterface {
 			return $this->all( $class );
 		}
 
-		$properties    = array_filter( $class::properties(), [ $this, 'isIndex' ] );
+		$properties    = array_filter( $class::properties(), [ $this, 'isColumn' ] );
 		$index_filter  = array_intersect_key( $filter, $properties );
 		$json_filter   = array_diff_key( $filter, $index_filter );
 		$scalar_filter = array_filter( $json_filter, 'is_scalar' );
@@ -280,7 +280,7 @@ abstract class SqlJsonPure implements StoreInterface {
 				$values[] = $value->from;
 				$values[] = $value->to;
 				return sprintf( '(%s BETWEEN ? AND ?)', $this->name( $key ) );
-			};
+			}
 
 			$values[] = $value;
 			return sprintf( '(%s = ?)', $this->name( $key ) );
@@ -320,7 +320,7 @@ abstract class SqlJsonPure implements StoreInterface {
 	}
 
 	/**
-	 * Gets a all of models of the given class from the data store.
+	 * Gets all models of the given class from the data store.
 	 *
 	 * @param class-string<ModelInterface> $class The model class name.
 	 *
@@ -395,7 +395,7 @@ abstract class SqlJsonPure implements StoreInterface {
 		}
 
 		$class      = $model::class;
-		$properties = array_filter( $model::properties(), [ $this, 'isIndex' ] );
+		$properties = array_filter( $model::properties(), [ $this, 'isColumn' ] );
 		$properties = array_keys( $properties );
 		$columns    = array_map( [ $this, 'name' ], $properties );
 		$columns[]  = $this->name( $this->modelColumn );
@@ -441,7 +441,6 @@ abstract class SqlJsonPure implements StoreInterface {
 	}
 
 	/**
-	 * /**
 	 * Deletes a model from the data store.
 	 *
 	 * @param class-string<ModelInterface> $class The model class name.
@@ -819,7 +818,7 @@ abstract class SqlJsonPure implements StoreInterface {
 	 */
 	protected function getModelColumns( string $class ): array {
 		$properties = $class::properties();
-		$properties = array_filter( $properties, [ $this, 'isIndex' ] );
+		$properties = array_filter( $properties, [ $this, 'isColumn' ] );
 
 		$columns = array_map( function( Property | array $property ) use ( $class ): array {
 			$id      = $property[ PropertyItem::ID ];
@@ -1077,7 +1076,7 @@ abstract class SqlJsonPure implements StoreInterface {
 		return str_replace( '\\', '_', $class );
 	}
 
-	protected function isIndex( Property | array $property ): bool {
+	protected function isColumn( Property | array $property ): bool {
 		return boolval( $property[ PropertyItem::PRIMARY ]
 			?? $property[ PropertyItem::UNIQUE ]
 			?? $property[ PropertyItem::INDEX ]
