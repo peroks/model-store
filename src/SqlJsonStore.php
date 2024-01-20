@@ -33,7 +33,7 @@ abstract class SqlJsonStore implements StoreInterface {
 	/**
 	 * @var array An array of prepared query statements.
 	 */
-	protected array $queries = [];
+	protected array $prepared = [];
 
 	/**
 	 * Constructor.
@@ -158,8 +158,21 @@ abstract class SqlJsonStore implements StoreInterface {
 	 * @return bool True if the model exists, false otherwise.
 	 */
 	public function has( string $class, int | string $id ): bool {
-		$query  = $this->hasRowStatement( $class );
-		$result = $this->select( $query, [ $id ] );
+		$table = $this->getTableName( $class );
+
+		// Set prepared query.
+		if ( empty( $this->prepared[ $table ]['has'] ) ) {
+			$query = vsprintf( 'SELECT 1 FROM %s WHERE %s = ? LIMIT 1', [
+				$this->name( $table ),
+				$this->name( $class::idProperty() ),
+			] );
+
+			$this->prepared[ $table ]['has'] = $this->prepare( $query );
+		}
+
+		// Get and execute prepared query.
+		$prepared = $this->prepared[ $table ]['has'];
+		$result   = $this->select( $prepared, [ $id ] );
 		return (bool) $result;
 	}
 
@@ -172,12 +185,25 @@ abstract class SqlJsonStore implements StoreInterface {
 	 * @return ModelInterface|null The matching model or null if not found.
 	 */
 	public function get( string $class, int | string $id ): ModelInterface | null {
-		$query = $this->getRowStatement( $class );
-		$rows  = $this->select( $query, [ $id ] );
+		$table = $this->getTableName( $class );
+
+		// Set prepared query.
+		if ( empty( $this->prepared[ $table ]['get'] ) ) {
+			$query = vsprintf( 'SELECT * FROM %s WHERE %s = ?', [
+				$this->name( $table ),
+				$this->name( $class::idProperty() ),
+			] );
+
+			$this->prepared[ $table ]['get'] = $this->prepare( $query );
+		}
+
+		// Get and execute prepared query.
+		$prepared = $this->prepared[ $table ]['get'];
+		$rows     = $this->select( $prepared, [ $id ] );
 
 		if ( $rows ) {
-			$data = $this->joinModel( $class, current( $rows ) );
-			return new $class( $data );
+			$row = current( $rows );
+			return $this->join( $class, $row );
 		}
 
 		return null;
@@ -192,11 +218,24 @@ abstract class SqlJsonStore implements StoreInterface {
 	 * @return ModelInterface[] An array of matching models.
 	 */
 	public function list( string $class, array $ids = [] ): array {
-		if ( $ids ) {
-			$filter = [ $class::idProperty() => $ids ];
-			return $this->filter( $class, $filter );
+		if ( empty( $ids ) ) {
+			return $this->all( $class );
 		}
-		return $this->filter( $class );
+
+		if ( count( $ids ) === 1 ) {
+			$model = $this->get( $class, current( $ids ) );
+			return [ $model ];
+		}
+
+		$table   = $this->name( $this->getTableName( $class ) );
+		$primary = $this->name( $class::idProperty() );
+		$fill    = join( ', ', array_fill( 0, count( $ids ), '?' ) );
+		$query   = "SELECT * FROM {$table} WHERE {$primary} IN ({$fill})";
+		$rows    = $this->query( $query, $ids );
+
+		return array_map( function( array $row ) use ( $class ): ModelInterface {
+			return $this->join( $class, $row );
+		}, $rows );
 	}
 
 	/**
@@ -208,38 +247,61 @@ abstract class SqlJsonStore implements StoreInterface {
 	 * @return ModelInterface[] An array of models.
 	 */
 	public function filter( string $class, array $filter = [] ): array {
-		$query = $this->filterRowsStatement( $class, $filter );
-		$rows  = $this->select( $query, $filter );
+		if ( empty( $filter ) ) {
+			return $this->all( $class );
+		}
+
+		$values = [];
+
+		$sql = array_map( function( string $key, mixed $value ) use ( &$values ): string {
+			if ( is_array( $value ) ) {
+				$values += $value;
+				$fill   = join( ', ', array_fill( 0, count( $value ), '?' ) );
+				return sprintf( '(%s IN (%s))', $this->name( $key ), $fill );
+			}
+
+			if ( $value instanceof Range ) {
+				$values[] = $value->from;
+				$values[] = $value->to;
+				return sprintf( '(%s BETWEEN ? AND ?)', $this->name( $key ) );
+			}
+
+			$values[] = $value;
+			return sprintf( '(%s = ?)', $this->name( $key ) );
+		}, array_keys( $filter ), $filter );
+
+		$table = $this->name( $this->getTableName( $class ) );
+		$sql   = join( ' AND ', $sql );
+		$query = "SELECT * FROM {$table} WHERE {$sql}";
+		$rows  = $this->query( $query, $values );
 
 		return array_map( function( array $row ) use ( $class ): ModelInterface {
-			$data = $this->joinModel( $class, $row );
-			return new $class( $data );
+			return $this->join( $class, $row );
 		}, $rows );
 	}
 
 	/**
-	 * Replaces sub-model ids with the sub-model itself.
+	 * Gets all models of the given class from the data store.
 	 *
-	 * @param class-string<ModelInterface> $class The class name to join.
-	 * @param array $data The model data.
+	 * @param class-string<ModelInterface> $class The model class name.
+	 *
+	 * @return ModelInterface[] An array of matching models.
 	 */
-	protected function joinModel( string $class, array $data ): array {
-		$properties = $class::properties();
+	protected function all( string $class ): array {
+		$table = $this->getTableName( $class );
+		$query = sprintf( 'SELECT * FROM %s', $this->name( $table ) );
 
-		foreach ( $data as $key => &$value ) {
-			$property = $properties[ $key ];
-
-			if ( $class = $property[ PropertyItem::MODEL ] ?? null ) {
-				if ( $value && $class::idProperty() ) {
-					$value = match ( $property[ PropertyItem::TYPE ] ) {
-						PropertyType::OBJECT => $this->get( $class, $value ),
-						PropertyType::ARRAY  => $this->list( $class, json_decode( $value, true ) ),
-					};
-				}
-			}
+		// Set prepared query.
+		if ( empty( $this->prepared[ $table ]['all'] ) ) {
+			$this->prepared[ $table ]['all'] = $this->prepare( $query );
 		}
 
-		return $data;
+		$prepared = $this->prepared[ $table ]['all'];
+		$rows     = $this->select( $prepared );
+
+		return array_map( function( array $row ) use ( $class ): ModelInterface {
+			return $this->join( $class, $row );
+		}, $rows );
 	}
 
 	/* -------------------------------------------------------------------------
@@ -258,7 +320,7 @@ abstract class SqlJsonStore implements StoreInterface {
 		$this->beginTransaction();
 
 		try {
-			$this->setMulti( [ $model ] );
+			$this->setSingle( $model );
 			$this->commit();
 		} catch ( Throwable $e ) {
 			$this->rollBack();
@@ -278,14 +340,7 @@ abstract class SqlJsonStore implements StoreInterface {
 	 * @return ModelInterface The stored model.
 	 */
 	protected function setSingle( ModelInterface $model ): ModelInterface {
-		$class = get_class( $model );
-		$query = $this->has( $class, $model->id() )
-			? $this->updateRowStatement( $class )
-			: $this->insertRowStatement( $class );
-
-		$values = $this->splitModel( $model );
-		$rows   = $this->update( $query, $values );
-
+		$this->setMulti( [ $model ] );
 		return $model;
 	}
 
@@ -295,75 +350,44 @@ abstract class SqlJsonStore implements StoreInterface {
 	 * @return ModelInterface[]
 	 */
 	protected function setMulti( array $models ): array {
-		if ( $models ) {
-			$query = $this->setMultiQuery( $models );
-			$this->exec( $query );
+		if ( empty( $model = current( $models ) ) ) {
+			return $models;
 		}
+
+		$class      = $model::class;
+		$properties = array_filter( $model::properties(), [ $this, 'isColumn' ] );
+		$properties = array_keys( $properties );
+		$columns    = array_map( [ $this, 'name' ], $properties );
+		$values     = [];
+
+		// Get the escaped values for multiple models.
+		$insert = array_map( function( ModelInterface $model ) use ( $properties, &$values ): string {
+			$data   = $this->split( $model );
+			$values = array_merge( $values, array_values( $data ) );
+			$fill   = array_fill( 0, count( $data ), '?' );
+			return sprintf( '(%s)', join( ', ', $fill ) );
+		}, $models );
+
+		// Assign insert values to update columns.
+		// ToDo: This syntax is deprecated beginning with MySQL 8.0.20, use an alias for the value rows instead.
+		$update = array_map( function( string $column ): string {
+			return "{$column} = VALUES({$column})";
+		}, $columns );
+
+		$table   = $this->name( $this->getTableName( $class ) );
+		$columns = join( ', ', $columns );
+		$insert  = join( ', ', $insert );
+		$update  = join( ', ', $update );
+
+		$sql[] = "INSERT INTO {$table} ({$columns})";
+		$sql[] = "VALUES {$insert}";
+		$sql[] = "ON DUPLICATE KEY UPDATE {$update}";
+
+		$query    = join( "\n", $sql );
+		$prepared = $this->prepare( $query );
+		$this->update( $prepared, $values );
+
 		return $models;
-	}
-
-	/**
-	 * Splits a model into separate sub-models and stores them.
-	 *
-	 * @param ModelInterface $model The model instance to be stored.
-	 *
-	 * @return array The model data to be stored on the db.
-	 */
-	protected function splitModel( ModelInterface $model ): array {
-		foreach ( $model::properties() as $id => $property ) {
-			$result[ $id ] = $this->splitModelValue( $model[ $id ], $property );
-		}
-		return $result ?? [];
-	}
-
-	/**
-	 * Gets the value of the given property to be store in a database column.
-	 *
-	 * @param mixed $value The property value.
-	 * @param Property|array $property The model property.
-	 *
-	 * @return mixed A value to be store in a database column.
-	 */
-	protected function splitModelValue( mixed $value, Property | array $property ): mixed {
-		$type  = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
-		$child = $property[ PropertyItem::MODEL ] ?? null;
-
-		// Short-circuit null values.
-		if ( is_null( $value ) ) {
-			return null;
-		}
-
-		// Transform boolean values.
-		if ( is_bool( $value ) ) {
-			return (int) $value;
-		}
-
-		// Transform objects.
-		if ( PropertyType::OBJECT === $type ) {
-			if ( $value instanceof ModelInterface ) {
-				if ( $value::idProperty() ) {
-					return $this->setSingle( $value )->id();
-				}
-				return Utils::encode( $value->data( ModelData::COMPACT ) );
-			}
-			return Utils::encode( $value );
-		}
-
-		// Transform arrays.
-		if ( PropertyType::ARRAY === $type ) {
-			if ( Utils::isModel( $child ) ) {
-				if ( $child::idProperty() ) {
-					$this->setMulti( $value );
-					$callback = fn( $item ) => $item->id();
-				} else {
-					$callback = fn( $item ) => $item->data( ModelData::COMPACT );
-				}
-				return Utils::encode( array_map( $callback, $value ) );
-			}
-			return Utils::encode( $value );
-		}
-
-		return $value;
 	}
 
 	/**
@@ -378,7 +402,7 @@ abstract class SqlJsonStore implements StoreInterface {
 		$this->beginTransaction();
 
 		try {
-			$result = $this->deleteInternal( $class, $id );
+			$result = $this->deleteSingle( $class, $id );
 			$this->commit();
 			return $result;
 		} catch ( Throwable $e ) {
@@ -395,9 +419,20 @@ abstract class SqlJsonStore implements StoreInterface {
 	 *
 	 * @return bool True if the model existed, false otherwise.
 	 */
-	protected function deleteInternal( string $class, int | string $id ): bool {
-		$query = $this->deleteRowStatement( $class );
-		return (bool) $this->update( $query, [ $id ] );
+	protected function deleteSingle( string $class, int | string $id ): bool {
+		$table = $this->getTableName( $class );
+
+		if ( empty( $this->prepared[ $table ]['delete'] ) ) {
+			$query = vsprintf( 'DELETE FROM %s WHERE %s = ?', [
+				$this->name( $table ),
+				$this->name( $class::idProperty() ),
+			] );
+
+			$this->prepared[ $table ]['delete'] = $this->prepare( $query );
+		}
+
+		$prepared = $this->prepared[ $table ]['delete'];
+		return (bool) $this->update( $prepared, [ $id ] );
 	}
 
 	/* -------------------------------------------------------------------------
@@ -427,292 +462,7 @@ abstract class SqlJsonStore implements StoreInterface {
 	}
 
 	/* -------------------------------------------------------------------------
-	 * Select, insert, update and delete rows.
-	 * ---------------------------------------------------------------------- */
-
-	/**
-	 * Generates a query to check if a model exists in the data store.
-	 *
-	 * @param string $table The table name.
-	 * @param string $primary The name of the primary key column.
-	 * @param string|int|null $value The model id to check for.
-	 *
-	 * @return string A query to check if a model exists.
-	 */
-	protected function hasRowQuery( string $table, string $primary, string | int | null $value = null ): string {
-		return vsprintf( 'SELECT 1 FROM %s WHERE %s = %s LIMIT 1', [
-			$this->name( $table ),
-			$this->name( $primary ),
-			isset( $value ) ? $this->escape( $value ) : '?',
-		] );
-	}
-
-	/**
-	 * Gets a prepared statement to check if a model exists.
-	 *
-	 * @param class-string<ModelInterface> $class The model class name.
-	 *
-	 * @return object A prepared query object.
-	 */
-	protected function hasRowStatement( string $class ): object {
-		$table = $this->getTableName( $class );
-
-		if ( empty( $this->queries[ $table ]['exists'] ) ) {
-			$query = $this->hasRowQuery( $table, $class::idProperty() );
-			return $this->queries[ $table ]['exists'] = $this->prepare( $query );
-		}
-		return $this->queries[ $table ]['exists'];
-	}
-
-	/**
-	 * Generates a query for selecting a single model from the data store.
-	 *
-	 * @param string $table The table name.
-	 * @param string $primary The name of the primary key column.
-	 * @param string|int|null $value The model id to select.
-	 *
-	 * @return string A query for selecting a single model.
-	 */
-	protected function getRowQuery( string $table, string $primary, string | int | null $value = null ): string {
-		return vsprintf( 'SELECT * FROM %s WHERE %s = %s', [
-			$this->name( $table ),
-			$this->name( $primary ),
-			isset( $value ) ? $this->escape( $value ) : '?',
-		] );
-	}
-
-	/**
-	 * Gets a prepared query for selecting a single model from the data store.
-	 *
-	 * @param class-string<ModelInterface> $class The model class name.
-	 *
-	 * @return object A prepared query object.
-	 */
-	protected function getRowStatement( string $class ): object {
-		$table = $this->getTableName( $class );
-
-		if ( empty( $this->queries[ $table ]['select'] ) ) {
-			$primary = $class::idProperty();
-			$query   = $this->getRowQuery( $table, $primary );
-			return $this->queries[ $table ]['select'] = $this->prepare( $query );
-		}
-		return $this->queries[ $table ]['select'];
-	}
-
-	/**
-	 * Generates a query for a filtered list of models from the data store.
-	 *
-	 * @param string $table The table name.
-	 * @param array $filter Key/value pairs to match model property values.
-	 *
-	 * @return string A query for a filtered list of models.
-	 */
-	protected function filterRowsQuery( string $table, array $filter ): string {
-		$table = $this->name( $table );
-
-		if ( empty( $filter ) ) {
-			return "SELECT * FROM {$table}";
-		}
-
-		$sql = array_map( function( string $key, mixed $value ): string {
-			return match ( true ) {
-				is_scalar( $value )     => sprintf( '(%s = :%s)', $this->name( $key ), $key ),
-				is_array( $value )      => sprintf( '(%s IN (%s))', $this->name( $key ), $this->escape( $value ) ),
-				$value instanceof Range => sprintf( '(%s BETWEEN %s AND %s)',
-					$this->name( $key ),
-					$this->escape( $value->from ),
-					$this->escape( $value->to )
-				),
-			};
-		}, array_keys( $filter ), $filter );
-
-		$sql = join( ' AND ', $sql );
-		return "SELECT * FROM {$table} WHERE {$sql}";
-	}
-
-	/**
-	 * Gets a prepared query for a filtered list of models from the data store.
-	 *
-	 * @param class-string<ModelInterface> $class The model class name.
-	 * @param array $filter Key/value pairs to match model property values.
-	 *
-	 * @return object A prepared query object.
-	 */
-	protected function filterRowsStatement( string $class, array $filter ): object {
-		$table = $this->getTableName( $class );
-		$query = $this->filterRowsQuery( $table, $filter );
-		return $this->prepare( $query );
-	}
-
-	/**
-	 * Generates a query for inserting a model into the given table.
-	 *
-	 * @param string $table The table name.
-	 * @param Property[]|array[] $properties An array of model properties.
-	 * @param array $values The model property values as key/value pairs.
-	 *
-	 * @return string A query for inserting a model into the given table.
-	 */
-	protected function insertRowQuery( string $table, array $properties, array $values = [] ): string {
-		$columns = [];
-
-		foreach ( $properties as $id => $property ) {
-			$value          = $values[ $id ] ?? null;
-			$columns[ $id ] = $this->name( $id );
-			$values[ $id ]  = isset( $value ) ? $this->escape( $value ) : ':' . $id;
-		}
-
-		$table   = $this->name( $table );
-		$columns = join( ', ', $columns );
-		$values  = join( ', ', $values );
-
-		return "INSERT INTO {$table} ({$columns}) VALUES ({$values})";
-	}
-
-	/**
-	 * Gets a prepared query for adding a model to the data store.
-	 *
-	 * @param class-string<ModelInterface> $class The model class name.
-	 *
-	 * @return object A prepared query object.
-	 */
-	protected function insertRowStatement( string $class ): object {
-		$table = $this->getTableName( $class );
-
-		if ( empty( $this->queries[ $table ]['insert'] ) ) {
-			$properties = $class::properties();
-			$query      = $this->insertRowQuery( $table, $properties );
-			return $this->queries[ $table ]['insert'] = $this->prepare( $query );
-		}
-		return $this->queries[ $table ]['insert'];
-	}
-
-	/**
-	 * Generates a query for updating a model.
-	 *
-	 * @param string $table The table name.
-	 * @param Property[]|array[] $properties An array of model properties.
-	 * @param string $primary The name of the primary key column.
-	 * @param array $values The model property values as key/value pairs.
-	 *
-	 * @return string A query for updating a model.
-	 */
-	protected function updateRowQuery( string $table, array $properties, string $primary, array $values = [] ): string {
-		$sql = [];
-
-		foreach ( $properties as $id => $property ) {
-			if ( $id !== $primary ) {
-				$value = $values[ $id ] ?? null;
-				$value = isset( $value ) ? $this->escape( $value ) : ':' . $id;
-				$name  = $this->name( $id );
-				$sql[] = "{$name} = {$value}";
-			}
-		}
-
-		$value = $values[ $primary ] ?? null;
-		$key   = isset( $value ) ? $this->escape( $value ) : ':' . $primary;
-
-		$table   = $this->name( $table );
-		$primary = $this->name( $primary );
-		$sql     = "\n\t" . join( ",\n\t", $sql ) . "\n";
-
-		return "UPDATE {$table} SET {$sql}WHERE {$primary} = {$key}";
-	}
-
-	/**
-	 * Gets a prepared a query for updating a model.
-	 *
-	 * @param class-string<ModelInterface> $class The model class name.
-	 *
-	 * @return object A prepared query object.
-	 */
-	protected function updateRowStatement( string $class ): object {
-		$table = $this->getTableName( $class );
-
-		if ( empty( $this->queries[ $table ]['update'] ) ) {
-			$properties = $class::properties();
-			$primary    = $class::idProperty();
-			$query      = $this->updateRowQuery( $table, $properties, $primary );
-			return $this->queries[ $table ]['update'] = $this->prepare( $query );
-		}
-		return $this->queries[ $table ]['update'];
-	}
-
-	/**
-	 * @param ModelInterface[] $models
-	 *
-	 * @return string
-	 */
-	protected function setMultiQuery( array $models ): string {
-		if ( empty( $model = current( $models ) ) ) {
-			return '';
-		}
-
-		$class      = $model::class;
-		$properties = $model::properties();
-		$columns    = array_map( [ $this, 'name' ], array_keys( $properties ) );
-
-		// Get the escaped values for multiple models.
-		$values = array_map( function( ModelInterface $model ): string {
-			$data = $this->splitModel( $model );
-			return sprintf( '(%s)', $this->escape( $data ) );
-		}, $models );
-
-		// Assign insert values to update columns.
-		// ToDo: This syntax is deprecated beginning with MySQL 8.0.20, use an alias for the value rows instead.
-		$update = array_map( function( string $column ): string {
-			return "{$column}=VALUES({$column})";
-		}, $columns );
-
-		$table   = $this->name( $this->getTableName( $class ) );
-		$columns = join( ', ', $columns );
-		$values  = join( ', ', $values );
-		$update  = join( ', ', $update );
-
-		$sql[] = "INSERT INTO {$table} ({$columns})";
-		$sql[] = "VALUES {$values}";
-		$sql[] = "ON DUPLICATE KEY UPDATE {$update}";
-
-		return join( "\n", $sql );
-	}
-
-	/**
-	 * Generates a query for deleting a model from the given table.
-	 *
-	 * @param string $table The table name.
-	 * @param string $primary The name of the primary key column.
-	 * @param string|int|null $value The model id to delete.
-	 *
-	 * @return string A query for inserting a model into the given table.
-	 */
-	protected function deleteRowQuery( string $table, string $primary, string | int | null $value = null ): string {
-		return vsprintf( 'DELETE FROM %s WHERE %s = %s', [
-			$this->name( $table ),
-			$this->name( $primary ),
-			isset( $value ) ? $this->escape( $value ) : '?',
-		] );
-	}
-
-	/**
-	 * Gets a prepared query for deleting a model from the data store.
-	 *
-	 * @param class-string<ModelInterface> $class The model class name.
-	 *
-	 * @return object A prepared query object.
-	 */
-	protected function deleteRowStatement( string $class ): object {
-		$table = $this->getTableName( $class );
-
-		if ( empty( $this->queries[ $table ]['delete'] ) ) {
-			$primary = $class::idProperty();
-			$query   = $this->deleteRowQuery( $table, $primary );
-			return $this->queries[ $table ]['delete'] = $this->prepare( $query );
-		}
-		return $this->queries[ $table ]['delete'];
-	}
-
-	/* -------------------------------------------------------------------------
-	 * Create and drop databases
+	 * Create, drop and build databases
 	 * ---------------------------------------------------------------------- */
 
 	/**
@@ -850,7 +600,7 @@ abstract class SqlJsonStore implements StoreInterface {
 		}
 
 		if ( isset( $sql ) ) {
-			$sql   = "\n\t" . join( ",\n\t", $sql ) . "\n";
+			$sql   = join( ', ', $sql );
 			$table = $this->name( $this->getTableName( $class ) );
 			return sprintf( 'CREATE TABLE IF NOT EXISTS %s (%s)', $table, $sql );
 		}
@@ -962,14 +712,14 @@ abstract class SqlJsonStore implements StoreInterface {
 	/**
 	 * Generates a column definition query for the given model property.
 	 *
-	 * @param Property|array $property A model property.
+	 * @param array $column A table column.
 	 *
 	 * @return string A column definition query.
 	 */
-	protected function defineColumnQuery( Property | array $property ): string {
-		$type     = $property['type'];
-		$required = $property['required'] ?? null;
-		$default  = $property['default'] ?? null;
+	protected function defineColumnQuery( array $column ): string {
+		$type     = $column['type'];
+		$required = $column['required'] ?? null;
+		$default  = $column['default'] ?? null;
 
 		// Cast default value.
 		if ( isset( $default ) ) {
@@ -979,7 +729,7 @@ abstract class SqlJsonStore implements StoreInterface {
 		}
 
 		return join( ' ', array_filter( [
-			$this->name( $property['name'] ),
+			$this->name( $column['name'] ),
 			$type,
 			$required ? 'NOT NULL' : null,
 			isset( $default ) ? "DEFAULT {$default}" : null,
@@ -1027,6 +777,9 @@ abstract class SqlJsonStore implements StoreInterface {
 	 * @return array[] An array of column definition.
 	 */
 	protected function getModelColumns( string $class ): array {
+		$properties = $class::properties();
+		$properties = array_filter( $properties, [ $this, 'isColumn' ] );
+
 		return array_map( function( Property | array $property ) use ( $class ): array {
 			$id      = $property[ PropertyItem::ID ];
 			$type    = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
@@ -1060,7 +813,7 @@ abstract class SqlJsonStore implements StoreInterface {
 			}
 
 			return $column;
-		}, $class::properties() );
+		}, $properties );
 	}
 
 	/**
@@ -1099,7 +852,7 @@ abstract class SqlJsonStore implements StoreInterface {
 			case PropertyType::DATETIME:
 				return 'varchar(32)';
 			case PropertyType::DATE:
-				return 'varchar(10)';
+				return 'varchar(16)';
 			case PropertyType::TIME:
 				return 'varchar(8)';
 			case PropertyType::OBJECT:
@@ -1253,30 +1006,25 @@ abstract class SqlJsonStore implements StoreInterface {
 		}
 
 		foreach ( $properties as $id => $property ) {
-			if ( Utils::isColumn( $property ) ) {
+			if ( $name = $property[ PropertyItem::INDEX ] ?? null ) {
+				$result[ $name ]['name']      = $name;
+				$result[ $name ]['type']      = 'INDEX';
+				$result[ $name ]['columns'][] = $id;
+			}
 
-				// Set index.
-				if ( $name = $property[ PropertyItem::INDEX ] ?? null ) {
-					$result[ $name ]['name']      = $name;
-					$result[ $name ]['type']      = 'INDEX';
-					$result[ $name ]['columns'][] = $id;
-				}
+			if ( $name = $property[ PropertyItem::UNIQUE ] ?? null ) {
+				$result[ $name ]['name']      = $name;
+				$result[ $name ]['type']      = 'UNIQUE';
+				$result[ $name ]['columns'][] = $id;
+			}
 
-				// Set unique index.
-				if ( $name = $property[ PropertyItem::UNIQUE ] ?? null ) {
-					$result[ $name ]['name']      = $name;
-					$result[ $name ]['type']      = 'UNIQUE';
-					$result[ $name ]['columns'][] = $id;
-				}
-
-				// Set indexes for foreign keys.
-				if ( Utils::needsForeignKey( $property ) ) {
-					$result[ $id ] = $result[ $id ] ?? [
-						'name'    => $id,
-						'type'    => 'INDEX',
-						'columns' => [ $id ],
-					];
-				}
+			// Set indexes for foreign keys.
+			if ( Utils::needsForeignKey( $property ) ) {
+				$result[ $id ] = $result[ $id ] ?? [
+					'name'    => $id,
+					'type'    => 'INDEX',
+					'columns' => [ $id ],
+				];
 			}
 		}
 
@@ -1544,13 +1292,108 @@ abstract class SqlJsonStore implements StoreInterface {
 		return str_replace( '\\', '_', $class );
 	}
 
+	protected function isColumn( Property | array $property ): bool {
+		return empty( $property[ PropertyType::FUNCTION ] ?? false );
+	}
+
+	/**
+	 * Replaces sub-model ids with the sub-model itself.
+	 *
+	 * @param class-string<ModelInterface> $class The class name to join.
+	 * @param array $row The model db row.
+	 */
+	protected function join( string $class, array $row ): ModelInterface {
+		$properties = $class::properties();
+
+		foreach ( $row as $id => &$value ) {
+			$property = $properties[ $id ];
+
+			if ( $child = $property[ PropertyItem::MODEL ] ?? null ) {
+				if ( $value && $child::idProperty() ) {
+					$value = match ( $property[ PropertyItem::TYPE ] ) {
+						PropertyType::OBJECT => $this->get( $child, $value ),
+						PropertyType::ARRAY  => $this->list( $child, json_decode( $value, true ) ),
+					};
+				}
+			}
+		}
+
+		return new $class( $row );
+	}
+
+	/**
+	 * Splits a model into separate sub-models and stores them.
+	 *
+	 * @param ModelInterface $model The model instance to be stored.
+	 *
+	 * @return array The model data to be stored on the db.
+	 */
+	protected function split( ModelInterface $model ): array {
+		$properties = $model::properties();
+		$result     = [];
+
+		foreach ( $model as $id => $value ) {
+			$property = $properties[ $id ];
+
+			if ( empty( $this->isColumn( $property ) ) ) {
+				continue;
+			}
+
+			if ( is_null( $value ) ) {
+				$result[ $id ] = $value;
+				continue;
+			}
+
+			// Transform boolean values.
+			if ( is_bool( $value ) ) {
+				$result[ $id ] = (int) $value;
+				continue;
+			}
+
+			$type  = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
+			$child = $property[ PropertyItem::MODEL ] ?? null;
+
+			// Transform objects.
+			if ( PropertyType::OBJECT === $type ) {
+				if ( $child ) {
+					if ( $child::idProperty() ) {
+						$value = $this->setSingle( $value )->id();
+					} else {
+						$value = Utils::encode( $value->data( ModelData::COMPACT ) );
+					}
+				} else {
+					$value = Utils::encode( $value );
+				}
+			}
+
+			// Transform arrays.
+			if ( PropertyType::ARRAY === $type ) {
+				if ( $child ) {
+					if ( $child::idProperty() ) {
+						$this->setMulti( $value );
+						$callback = fn( $item ) => $item->id();
+					} else {
+						$callback = fn( $item ) => $item->data( ModelData::COMPACT );
+					}
+					$value = Utils::encode( array_map( $callback, $value ) );
+				} else {
+					$value = Utils::encode( $value );
+				}
+			}
+
+			$result[ $id ] = $value;
+		}
+
+		return $result;
+	}
+
 	/**
 	 * Extract all sub-models from the given models.
 	 *
-	 * @param ModelInterface[]|string[] $models An array of model class names.
-	 * @param ModelInterface[]|string[] $result An array of all model and sub-model class names.
+	 * @param class-string<ModelInterface>[] $models An array of model class names.
+	 * @param class-string<ModelInterface>[] $result An array of all model and sub-model class names.
 	 *
-	 * @return ModelInterface[]|string[] An array of all model and sub-model class names.
+	 * @return class-string<ModelInterface>[] An array of all model and sub-model class names.
 	 */
 	protected function getAllModels( array $models, array &$result = [] ): array {
 		$result = $result ?: $models;
