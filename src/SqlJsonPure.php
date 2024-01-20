@@ -211,9 +211,8 @@ abstract class SqlJsonPure implements StoreInterface {
 		$rows     = $this->select( $prepared, [ $id ] );
 
 		if ( $rows ) {
-			$row  = current( $rows );
-			$data = json_decode( $row[ $this->modelColumn ], true );
-			return $this->join( $class, $data );
+			$row = current( $rows );
+			return $this->join( $class, $row );
 		}
 
 		return null;
@@ -244,8 +243,7 @@ abstract class SqlJsonPure implements StoreInterface {
 		$rows    = $this->query( $query, $ids );
 
 		return array_map( function( array $row ) use ( $class ): ModelInterface {
-			$data = json_decode( $row[ $this->modelColumn ], true );
-			return $this->join( $class, $data );
+			return $this->join( $class, $row );
 		}, $rows );
 	}
 
@@ -314,8 +312,7 @@ abstract class SqlJsonPure implements StoreInterface {
 		$rows  = $this->query( $query, $values );
 
 		return array_map( function( array $row ) use ( $class ): ModelInterface {
-			$data = json_decode( $row[ $this->modelColumn ], true );
-			return $this->join( $class, $data );
+			return $this->join( $class, $row );
 		}, $rows );
 	}
 
@@ -339,8 +336,7 @@ abstract class SqlJsonPure implements StoreInterface {
 		$rows     = $this->select( $prepared );
 
 		return array_map( function( array $row ) use ( $class ): ModelInterface {
-			$data = json_decode( $row[ $this->modelColumn ], true );
-			return $this->join( $class, $data );
+			return $this->join( $class, $row );
 		}, $rows );
 	}
 
@@ -640,7 +636,7 @@ abstract class SqlJsonPure implements StoreInterface {
 		}
 
 		if ( isset( $sql ) ) {
-			$sql   = "\n\t" . join( ",\n\t", $sql ) . "\n";
+			$sql   = join( ', ', $sql );
 			$table = $this->name( $this->getTableName( $class ) );
 			return sprintf( 'CREATE TABLE IF NOT EXISTS %s (%s)', $table, $sql );
 		}
@@ -1077,20 +1073,22 @@ abstract class SqlJsonPure implements StoreInterface {
 	}
 
 	protected function isColumn( Property | array $property ): bool {
-		return boolval( $property[ PropertyItem::PRIMARY ]
-			?? $property[ PropertyItem::UNIQUE ]
-			?? $property[ PropertyItem::INDEX ]
-			?? false );
+		$index = ( $property[ PropertyItem::PRIMARY ] ?? false )
+			|| ( $property[ PropertyItem::UNIQUE ] ?? '' )
+			|| ( $property[ PropertyItem::INDEX ] ?? '' );
+
+		return $index && empty( $property[ PropertyType::FUNCTION ] ?? false );
 	}
 
 	/**
 	 * Replaces sub-model ids with the sub-model itself.
 	 *
 	 * @param class-string<ModelInterface> $class The class name to join.
-	 * @param array $data The model data.
+	 * @param array $row The model db row.
 	 */
-	protected function join( string $class, array $data ): ModelInterface {
+	protected function join( string $class, array $row ): ModelInterface {
 		$properties = $class::properties();
+		$data       = json_decode( $row[ $this->modelColumn ], true );
 
 		foreach ( $data as $id => &$value ) {
 			$property = $properties[ $id ];
