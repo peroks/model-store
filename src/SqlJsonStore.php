@@ -240,8 +240,21 @@ abstract class SqlJsonStore implements StoreInterface {
 			return $this->all( $class );
 		}
 
-		$values = [];
-		$sql    = array_map( function( string $key, mixed $value ) use ( &$values ): string {
+		$properties = $class::properties();
+		$properties = array_filter( $properties, function( Property | array $property ) {
+			if ( PropertyType::ARRAY === $property[ PropertyItem::TYPE ] ?? null ) {
+				if ( $child = $property[ PropertyItem::MODEL ] ?? null ) {
+					return (bool) $child::idProperty();
+				}
+			}
+			return false;
+		} );
+
+		$index_filter = array_diff_key( $filter, $properties );
+		$json_filter  = array_intersect_key( $filter, $properties );
+		$values       = [];
+
+		$sql = array_map( function( string $key, mixed $value ) use ( &$values ): string {
 			if ( is_array( $value ) ) {
 				$values = array_merge( $values, $value );
 				$fill   = join( ', ', array_fill( 0, count( $value ), '?' ) );
@@ -256,7 +269,19 @@ abstract class SqlJsonStore implements StoreInterface {
 
 			$values[] = $value;
 			return sprintf( '(%s = ?)', $this->name( $key ) );
-		}, array_keys( $filter ), $filter );
+		}, array_keys( $index_filter ), $index_filter );
+
+		foreach ( $json_filter as $key => $value ) {
+			if ( is_scalar( $value ) ) {
+				$values[] = $value;
+				$sql[]    = sprintf( 'JSON_CONTAINS(%s, ?)', $this->name( $key ) );
+			}
+		}
+
+		$query = vsprintf( 'SELECT * FROM %s WHERE %s', [
+			$this->name( $this->getTableName( $class ) ),
+			join( ' AND ', $sql ),
+		] );
 
 		$query = vsprintf( 'SELECT * FROM %s WHERE %s', [
 			$this->name( $this->getTableName( $class ) ),
