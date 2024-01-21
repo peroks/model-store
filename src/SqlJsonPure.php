@@ -102,28 +102,6 @@ abstract class SqlJsonPure extends SqlJsonStore implements StoreInterface {
 	}
 
 	/* -------------------------------------------------------------------------
-	 * Create, drop and build databases
-	 * ---------------------------------------------------------------------- */
-
-	/**
-	 * Creates or updates database tables for the given models and their sub-models.
-	 *
-	 * @param ModelInterface[]|string[] $classes An array of model class names.
-	 *
-	 * @return int The number of created or updated tables.
-	 */
-	protected function buildDatabase( array $classes ): int {
-		$count = 0;
-
-		// Create or alter model tables (columns + indexes).
-		foreach ( $classes as $name ) {
-			$count += $this->createTable( $name ) ?: $this->alterTable( $name );
-		}
-
-		return $count;
-	}
-
-	/* -------------------------------------------------------------------------
 	 * Show and define table columns.
 	 * ---------------------------------------------------------------------- */
 
@@ -135,33 +113,7 @@ abstract class SqlJsonPure extends SqlJsonStore implements StoreInterface {
 	 * @return array[] An array of column definition.
 	 */
 	protected function getModelColumns( string $class ): array {
-		$properties = $class::properties();
-		$properties = array_filter( $properties, [ $this, 'isColumn' ] );
-
-		$columns = array_map( function( Property | array $property ) use ( $class ): array {
-			$id      = $property[ PropertyItem::ID ];
-			$type    = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
-			$default = $property[ PropertyItem::DEFAULT ] ?? null;
-
-			if ( empty( is_scalar( $default ) ) ) {
-				$default = null;
-			}
-
-			if ( PropertyType::UUID === $type && true === $default ) {
-				$default = null;
-			}
-
-			if ( is_bool( $default ) ) {
-				$default = (int) $default;
-			}
-
-			return [
-				'name'     => $id,
-				'type'     => $this->getColumnType( $property ),
-				'required' => $property[ PropertyItem::REQUIRED ] ?? false,
-				'default'  => $default,
-			];
-		}, $properties );
+		$columns = parent::getModelColumns( $class );
 
 		$columns[ $this->modelColumn ] = [
 			'name'     => $this->modelColumn,
@@ -180,7 +132,9 @@ abstract class SqlJsonPure extends SqlJsonStore implements StoreInterface {
 	protected function isColumn( Property | array $property ): bool {
 		$index = ( $property[ PropertyItem::PRIMARY ] ?? false )
 			|| ( $property[ PropertyItem::UNIQUE ] ?? '' )
-			|| ( $property[ PropertyItem::INDEX ] ?? '' );
+			|| ( $property[ PropertyItem::INDEX ] ?? '' )
+			|| ( $property[ PropertyItem::FOREIGN ] ?? '' )
+			|| $this->needsForeignKey( $property );
 
 		return $index && parent::isColumn( $property );
 	}
@@ -196,17 +150,6 @@ abstract class SqlJsonPure extends SqlJsonStore implements StoreInterface {
 		$columns    = array_keys( $properties );
 		$columns[]  = $this->modelColumn;
 		return $columns;
-	}
-
-	/**
-	 * Checks if a model property needs a foreign key.
-	 *
-	 * @param Property|array $property The property.
-	 *
-	 * @return bool
-	 */
-	protected function needsForeignKey( Property | array $property ): bool {
-		return false;
 	}
 
 	/**

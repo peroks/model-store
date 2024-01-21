@@ -782,7 +782,6 @@ abstract class SqlJsonStore implements StoreInterface {
 		return array_map( function( Property | array $property ) use ( $class ): array {
 			$id      = $property[ PropertyItem::ID ];
 			$type    = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
-			$child   = $property[ PropertyItem::MODEL ] ?? null;
 			$default = $property[ PropertyItem::DEFAULT ] ?? null;
 
 			if ( empty( is_scalar( $default ) ) ) {
@@ -797,21 +796,12 @@ abstract class SqlJsonStore implements StoreInterface {
 				$default = (int) $default;
 			}
 
-			$column = [
+			return [
 				'name'     => $id,
 				'type'     => $this->getColumnType( $property ),
 				'required' => $property[ PropertyItem::REQUIRED ] ?? false,
 				'default'  => $default,
 			];
-
-			// Replace sub-models with foreign keys.
-			if ( PropertyType::OBJECT === $type && Utils::isModel( $child ) ) {
-				if ( $primary = $child::getProperty( $child::idProperty() ) ) {
-					$column['type'] = $this->getColumnType( $primary );
-				}
-			}
-
-			return $column;
 		}, $properties );
 	}
 
