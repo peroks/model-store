@@ -54,7 +54,7 @@ abstract class SqlJsonPure extends SqlJsonStore implements StoreInterface {
 
 		$sql = array_map( function( string $key, mixed $value ) use ( &$values ): string {
 			if ( is_array( $value ) ) {
-				$values += $value;
+				$values = array_merge( $values, $value );
 				$fill   = join( ', ', array_fill( 0, count( $value ), '?' ) );
 				return sprintf( '(%s IN (%s))', $this->name( $key ), $fill );
 			}
@@ -77,8 +77,8 @@ abstract class SqlJsonPure extends SqlJsonStore implements StoreInterface {
 		foreach ( $rest_filter as $key => $value ) {
 			if ( is_array( $value ) ) {
 				// Json values don't support comparison with the "IN" operator.
-				$sql[] = vsprintf( 'JSON_CONTAINS(JSON_ARRAY(%s), JSON_EXTRACT(%s, "$.%s"))', [
-					$this->escape( $value ),
+				$values[] = Utils::encode( $value );
+				$sql[]    = vsprintf( 'JSON_CONTAINS(?, JSON_EXTRACT(%s, "$.%s"))', [
 					$this->name( $this->modelColumn ),
 					$key,
 				] );
@@ -91,10 +91,13 @@ abstract class SqlJsonPure extends SqlJsonStore implements StoreInterface {
 			}
 		}
 
-		$table = $this->name( $this->getTableName( $class ) );
-		$sql   = join( ' AND ', $sql );
-		$query = "SELECT * FROM {$table} WHERE {$sql}";
-		$rows  = $this->query( $query, $values );
+		$query = vsprintf( 'SELECT * FROM %s WHERE %s', [
+			$this->name( $this->getTableName( $class ) ),
+			join( ' AND ', $sql ),
+		] );
+
+		$prepared = $this->getPreparedQuery( $query );
+		$rows     = $this->select( $prepared, $values );
 
 		return array_map( function( array $row ) use ( $class ): ModelInterface {
 			return $this->join( $class, $row );
@@ -149,6 +152,7 @@ abstract class SqlJsonPure extends SqlJsonStore implements StoreInterface {
 		$properties = array_filter( $properties, [ $this, 'isColumn' ] );
 		$columns    = array_keys( $properties );
 		$columns[]  = $this->modelColumn;
+
 		return $columns;
 	}
 
@@ -210,7 +214,7 @@ abstract class SqlJsonPure extends SqlJsonStore implements StoreInterface {
 			// Transform models.
 			if ( $class = $property[ PropertyItem::MODEL ] ?? null ) {
 				if ( $class::idProperty() ) {
-					$value = match ( $property[ PropertyItem::TYPE ] ) {
+					$value = match ( $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED ) {
 						PropertyType::OBJECT => $this->setSingle( $value )->id(),
 						PropertyType::ARRAY  => array_map( fn( $item ) => $item->id(), $this->setMulti( $value ) ),
 					};

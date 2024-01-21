@@ -158,20 +158,13 @@ abstract class SqlJsonStore implements StoreInterface {
 	 * @return bool True if the model exists, false otherwise.
 	 */
 	public function has( string $class, int | string $id ): bool {
-		$table = $this->getTableName( $class );
-
-		// Set prepared query.
-		if ( empty( $this->prepared[ $table ]['has'] ) ) {
-			$query = vsprintf( 'SELECT 1 FROM %s WHERE %s = ? LIMIT 1', [
-				$this->name( $table ),
-				$this->name( $class::idProperty() ),
-			] );
-
-			$this->prepared[ $table ]['has'] = $this->prepare( $query );
-		}
+		$query = vsprintf( 'SELECT 1 FROM %s WHERE %s = ? LIMIT 1', [
+			$this->name( $this->getTableName( $class ) ),
+			$this->name( $class::idProperty() ),
+		] );
 
 		// Get and execute prepared query.
-		$prepared = $this->prepared[ $table ]['has'];
+		$prepared = $this->getPreparedQuery( $query );
 		$result   = $this->select( $prepared, [ $id ] );
 		return (bool) $result;
 	}
@@ -185,20 +178,13 @@ abstract class SqlJsonStore implements StoreInterface {
 	 * @return ModelInterface|null The matching model or null if not found.
 	 */
 	public function get( string $class, int | string $id ): ModelInterface | null {
-		$table = $this->getTableName( $class );
-
-		// Set prepared query.
-		if ( empty( $this->prepared[ $table ]['get'] ) ) {
-			$query = vsprintf( 'SELECT * FROM %s WHERE %s = ?', [
-				$this->name( $table ),
-				$this->name( $class::idProperty() ),
-			] );
-
-			$this->prepared[ $table ]['get'] = $this->prepare( $query );
-		}
+		$query = vsprintf( 'SELECT * FROM %s WHERE %s = ?', [
+			$this->name( $this->getTableName( $class ) ),
+			$this->name( $class::idProperty() ),
+		] );
 
 		// Get and execute prepared query.
-		$prepared = $this->prepared[ $table ]['get'];
+		$prepared = $this->getPreparedQuery( $query );
 		$rows     = $this->select( $prepared, [ $id ] );
 
 		if ( $rows ) {
@@ -227,11 +213,14 @@ abstract class SqlJsonStore implements StoreInterface {
 			return [ $model ];
 		}
 
-		$table   = $this->name( $this->getTableName( $class ) );
-		$primary = $this->name( $class::idProperty() );
-		$fill    = join( ', ', array_fill( 0, count( $ids ), '?' ) );
-		$query   = "SELECT * FROM {$table} WHERE {$primary} IN ({$fill})";
-		$rows    = $this->query( $query, $ids );
+		$query = vsprintf( 'SELECT * FROM %s WHERE %s IN (%s)', [
+			$this->name( $this->getTableName( $class ) ),
+			$this->name( $class::idProperty() ),
+			join( ', ', array_fill( 0, count( $ids ), '?' ) ),
+		] );
+
+		$prepared = $this->getPreparedQuery( $query );
+		$rows     = $this->select( $prepared, $ids );
 
 		return array_map( function( array $row ) use ( $class ): ModelInterface {
 			return $this->join( $class, $row );
@@ -252,10 +241,9 @@ abstract class SqlJsonStore implements StoreInterface {
 		}
 
 		$values = [];
-
-		$sql = array_map( function( string $key, mixed $value ) use ( &$values ): string {
+		$sql    = array_map( function( string $key, mixed $value ) use ( &$values ): string {
 			if ( is_array( $value ) ) {
-				$values += $value;
+				$values = array_merge( $values, $value );
 				$fill   = join( ', ', array_fill( 0, count( $value ), '?' ) );
 				return sprintf( '(%s IN (%s))', $this->name( $key ), $fill );
 			}
@@ -270,10 +258,13 @@ abstract class SqlJsonStore implements StoreInterface {
 			return sprintf( '(%s = ?)', $this->name( $key ) );
 		}, array_keys( $filter ), $filter );
 
-		$table = $this->name( $this->getTableName( $class ) );
-		$sql   = join( ' AND ', $sql );
-		$query = "SELECT * FROM {$table} WHERE {$sql}";
-		$rows  = $this->query( $query, $values );
+		$query = vsprintf( 'SELECT * FROM %s WHERE %s', [
+			$this->name( $this->getTableName( $class ) ),
+			join( ' AND ', $sql ),
+		] );
+
+		$prepared = $this->getPreparedQuery( $query );
+		$rows     = $this->select( $prepared, $values );
 
 		return array_map( function( array $row ) use ( $class ): ModelInterface {
 			return $this->join( $class, $row );
@@ -288,15 +279,9 @@ abstract class SqlJsonStore implements StoreInterface {
 	 * @return ModelInterface[] An array of matching models.
 	 */
 	protected function all( string $class ): array {
-		$table = $this->getTableName( $class );
-		$query = sprintf( 'SELECT * FROM %s', $this->name( $table ) );
-
-		// Set prepared query.
-		if ( empty( $this->prepared[ $table ]['all'] ) ) {
-			$this->prepared[ $table ]['all'] = $this->prepare( $query );
-		}
-
-		$prepared = $this->prepared[ $table ]['all'];
+		$table    = $this->getTableName( $class );
+		$query    = sprintf( 'SELECT * FROM %s', $this->name( $table ) );
+		$prepared = $this->getPreparedQuery( $query );
 		$rows     = $this->select( $prepared );
 
 		return array_map( function( array $row ) use ( $class ): ModelInterface {
@@ -382,8 +367,8 @@ abstract class SqlJsonStore implements StoreInterface {
 		$sql[] = "VALUES {$insert}";
 		$sql[] = "ON DUPLICATE KEY UPDATE {$update}";
 
-		$query    = join( "\n", $sql );
-		$prepared = $this->prepare( $query );
+		$query    = join( ' ', $sql );
+		$prepared = $this->getPreparedQuery( $query );
 		$this->update( $prepared, $values );
 
 		return $models;
@@ -419,18 +404,12 @@ abstract class SqlJsonStore implements StoreInterface {
 	 * @return bool True if the model existed, false otherwise.
 	 */
 	protected function deleteSingle( string $class, int | string $id ): bool {
-		$table = $this->getTableName( $class );
+		$query = vsprintf( 'DELETE FROM %s WHERE %s = ?', [
+			$this->name( $this->getTableName( $class ) ),
+			$this->name( $class::idProperty() ),
+		] );
 
-		if ( empty( $this->prepared[ $table ]['delete'] ) ) {
-			$query = vsprintf( 'DELETE FROM %s WHERE %s = ?', [
-				$this->name( $table ),
-				$this->name( $class::idProperty() ),
-			] );
-
-			$this->prepared[ $table ]['delete'] = $this->prepare( $query );
-		}
-
-		$prepared = $this->prepared[ $table ]['delete'];
+		$prepared = $this->getPreparedQuery( $query );
 		return (bool) $this->update( $prepared, [ $id ] );
 	}
 
@@ -1281,6 +1260,16 @@ abstract class SqlJsonStore implements StoreInterface {
 		return str_replace( '\\', '_', $class );
 	}
 
+	protected function getPreparedQuery( string $query ): object {
+		$hash = md5( $query );
+
+		if ( $prepared = $this->prepared[ $hash ] ?? null ) {
+			return $prepared;
+		}
+
+		return $this->prepared[ $hash ] = $this->prepare( $query );
+	}
+
 	protected function isColumn( Property | array $property ): bool {
 		return empty( $property[ PropertyType::FUNCTION ] ?? false );
 	}
@@ -1332,10 +1321,14 @@ abstract class SqlJsonStore implements StoreInterface {
 
 			if ( $child = $property[ PropertyItem::MODEL ] ?? null ) {
 				if ( $value && $child::idProperty() ) {
-					$value = match ( $property[ PropertyItem::TYPE ] ) {
-						PropertyType::OBJECT => $this->get( $child, $value ),
-						PropertyType::ARRAY  => $this->list( $child, json_decode( $value, true ) ),
-					};
+					$type = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
+
+					if ( PropertyType::OBJECT === $type ) {
+						$value = $this->get( $child, $value );
+					} elseif ( PropertyType::ARRAY === $type ) {
+						$ids   = json_decode( $value, true );
+						$value = $ids ? $this->list( $child, $ids ) : [];
+					}
 				}
 			}
 		}
