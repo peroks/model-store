@@ -354,17 +354,16 @@ abstract class SqlJsonStore implements StoreInterface {
 			return $models;
 		}
 
-		$class      = $model::class;
-		$properties = array_filter( $model::properties(), [ $this, 'isColumn' ] );
-		$properties = array_keys( $properties );
-		$columns    = array_map( [ $this, 'name' ], $properties );
-		$values     = [];
+		$class   = $model::class;
+		$columns = $this->getRowColumns( $class );
+		$columns = array_map( [ $this, 'name' ], $columns );
+		$values  = [];
 
-		// Get the escaped values for multiple models.
-		$insert = array_map( function( ModelInterface $model ) use ( $properties, &$values ): string {
-			$data   = $this->split( $model );
-			$values = array_merge( $values, array_values( $data ) );
-			$fill   = array_fill( 0, count( $data ), '?' );
+		// Get the values for multiple models.
+		$insert = array_map( function( ModelInterface $model ) use ( &$values ): string {
+			$row    = $this->split( $model );
+			$values = array_merge( $values, array_values( $row ) );
+			$fill   = array_fill( 0, count( $row ), '?' );
 			return sprintf( '(%s)', join( ', ', $fill ) );
 		}, $models );
 
@@ -1019,7 +1018,7 @@ abstract class SqlJsonStore implements StoreInterface {
 			}
 
 			// Set indexes for foreign keys.
-			if ( Utils::needsForeignKey( $property ) ) {
+			if ( $this->needsForeignKey( $property ) ) {
 				$result[ $id ] = $result[ $id ] ?? [
 					'name'    => $id,
 					'type'    => 'INDEX',
@@ -1222,7 +1221,7 @@ abstract class SqlJsonStore implements StoreInterface {
 	 */
 	protected function getModelForeign( string $class ): array {
 		foreach ( $class::properties() as $id => $property ) {
-			if ( Utils::needsForeignKey( $property ) ) {
+			if ( $this->needsForeignKey( $property ) ) {
 				$model    = $property[ PropertyItem::MODEL ] ?? null;
 				$foreign  = $property[ PropertyItem::FOREIGN ] ?? $model;
 				$required = $property[ PropertyItem::REQUIRED ] ?? false;
@@ -1294,6 +1293,39 @@ abstract class SqlJsonStore implements StoreInterface {
 
 	protected function isColumn( Property | array $property ): bool {
 		return empty( $property[ PropertyType::FUNCTION ] ?? false );
+	}
+
+	/**
+	 * @param class-string<ModelInterface> $class The model class name.
+	 *
+	 * @return string[] The db row columns.
+	 */
+	protected function getRowColumns( string $class ): array {
+		$properties = $class::properties();
+		$properties = array_filter( $properties, [ $this, 'isColumn' ] );
+		return array_keys( $properties );
+	}
+
+	/**
+	 * Checks if a model property needs a foreign key.
+	 *
+	 * @param Property|array $property The property.
+	 *
+	 * @return bool
+	 */
+	protected function needsForeignKey( Property | array $property ): bool {
+		$type = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
+
+		if ( PropertyType::ARRAY !== $type && empty( $property[ PropertyItem::MATCH ] ) ) {
+			$model   = $property[ PropertyItem::MODEL ] ?? null;
+			$foreign = $property[ PropertyItem::FOREIGN ] ?? $model;
+
+			if ( Utils::isModel( $foreign ) && $foreign::idProperty() ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**
