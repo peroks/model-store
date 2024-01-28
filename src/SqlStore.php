@@ -16,6 +16,7 @@ use Peroks\Model\ModelData;
 use Peroks\Model\Property;
 use Peroks\Model\PropertyItem;
 use Peroks\Model\PropertyType;
+use Peroks\Model\Utils;
 use Throwable;
 
 abstract class SqlStore implements StoreInterface {
@@ -33,12 +34,7 @@ abstract class SqlStore implements StoreInterface {
 	/**
 	 * @var array An array of prepared query statements.
 	 */
-	protected array $queries = [];
-
-	/**
-	 * @var array A temp array of model relations.
-	 */
-	protected array $relations = [];
+	protected array $prepared = [];
 
 	/**
 	 * Constructor.
@@ -163,8 +159,14 @@ abstract class SqlStore implements StoreInterface {
 	 * @return bool True if the model exists, false otherwise.
 	 */
 	public function has( string $class, int | string $id ): bool {
-		$query  = $this->hasRowStatement( $class );
-		$result = $this->select( $query, [ $id ] );
+		$query = vsprintf( 'SELECT 1 FROM %s WHERE %s = ? LIMIT 1', [
+			$this->name( $this->getTableName( $class ) ),
+			$this->name( $class::idProperty() ),
+		] );
+
+		// Get and execute prepared query.
+		$prepared = $this->getPreparedQuery( $query );
+		$result   = $this->select( $prepared, [ $id ] );
 		return (bool) $result;
 	}
 
@@ -177,12 +179,18 @@ abstract class SqlStore implements StoreInterface {
 	 * @return ModelInterface|null The matching model or null if not found.
 	 */
 	public function get( string $class, int | string $id ): ModelInterface | null {
-		$query = $this->getRowStatement( $class );
-		$rows  = $this->select( $query, [ $id ] );
+		$query = vsprintf( 'SELECT * FROM %s WHERE %s = ?', [
+			$this->name( $this->getTableName( $class ) ),
+			$this->name( $class::idProperty() ),
+		] );
+
+		// Get and execute prepared query.
+		$prepared = $this->getPreparedQuery( $query );
+		$rows     = $this->select( $prepared, [ $id ] );
 
 		if ( $rows ) {
-			$model = new $class( $rows[0] );
-			return $this->restoreSingle( $model );
+			$row = current( $rows );
+			return $this->join( $class, $row );
 		}
 
 		return null;
@@ -197,11 +205,39 @@ abstract class SqlStore implements StoreInterface {
 	 * @return ModelInterface[] An array of matching models.
 	 */
 	public function list( string $class, array $ids = [] ): array {
-		if ( $ids ) {
-			$filter = [ $class::idProperty() => $ids ];
-			return $this->filter( $class, $filter );
+		if ( count( $ids ) === 1 ) {
+			$model = $this->get( $class, current( $ids ) );
+			return [ $model ];
 		}
-		return $this->filter( $class );
+
+		$rows = $this->listRows( $class, $ids );
+
+		return array_map( function( array $row ) use ( $class ): ModelInterface {
+			return $this->join( $class, $row );
+		}, $rows );
+	}
+
+	/**
+	 * Gets a list of db rows matching the given ids from the data store.
+	 *
+	 * @param class-string<ModelInterface> $class The model class name.
+	 * @param int[]|string[] $ids An array of model ids.
+	 *
+	 * @return array[] An array of matching db rows.
+	 */
+	protected function listRows( string $class, array $ids = [] ): array {
+		if ( empty( $ids ) ) {
+			return $this->allRows( $class );
+		}
+
+		$query = vsprintf( 'SELECT * FROM %s WHERE %s IN (%s)', [
+			$this->name( $this->getTableName( $class ) ),
+			$this->name( $class::idProperty() ),
+			join( ', ', array_fill( 0, count( $ids ), '?' ) ),
+		] );
+
+		$prepared = $this->getPreparedQuery( $query );
+		return $this->select( $prepared, $ids );
 	}
 
 	/**
@@ -213,11 +249,100 @@ abstract class SqlStore implements StoreInterface {
 	 * @return ModelInterface[] An array of models.
 	 */
 	public function filter( string $class, array $filter = [] ): array {
-		$query = $this->filterRowsStatement( $class, $filter );
-		$rows  = $this->select( $query, $filter );
-		$rows  = array_map( fn( array $row ) => new $class( $row ), $rows );
+		$rows = $this->filterRows( $class, $filter );
 
-		return static::restoreMulti( $class, $rows );
+		return array_map( function( array $row ) use ( $class ): ModelInterface {
+			return $this->join( $class, $row );
+		}, $rows );
+	}
+
+	/**
+	 * Gets a filtered list of db rows from the data store.
+	 *
+	 * @param class-string<ModelInterface> $class The model class name.
+	 * @param array $filter Key/value pairs to match model property values.
+	 *
+	 * @return array[] An array db rows.
+	 */
+	public function filterRows( string $class, array $filter = [] ): array {
+		if ( empty( $filter ) ) {
+			return $this->allRows( $class );
+		}
+
+		$properties = $class::properties();
+		$properties = array_filter( $properties, function( Property | array $property ) {
+			if ( PropertyType::ARRAY === $property[ PropertyItem::TYPE ] ?? null ) {
+				if ( $child = $property[ PropertyItem::MODEL ] ?? null ) {
+					return (bool) $child::idProperty();
+				}
+			}
+			return false;
+		} );
+
+		$index_filter = array_diff_key( $filter, $properties );
+		$json_filter  = array_intersect_key( $filter, $properties );
+		$values       = [];
+
+		$sql = array_map( function( string $key, mixed $value ) use ( &$values ): string {
+			if ( is_array( $value ) ) {
+				$values = array_merge( $values, $value );
+				$fill   = join( ', ', array_fill( 0, count( $value ), '?' ) );
+				return sprintf( '(%s IN (%s))', $this->name( $key ), $fill );
+			}
+
+			if ( $value instanceof Range ) {
+				$values[] = $value->from;
+				$values[] = $value->to;
+				return sprintf( '(%s BETWEEN ? AND ?)', $this->name( $key ) );
+			}
+
+			$values[] = $value;
+			return sprintf( '(%s = ?)', $this->name( $key ) );
+		}, array_keys( $index_filter ), $index_filter );
+
+		foreach ( $json_filter as $key => $value ) {
+			if ( is_scalar( $value ) ) {
+				$values[] = $value;
+				$sql[]    = sprintf( 'JSON_CONTAINS(%s, ?)', $this->name( $key ) );
+			}
+		}
+
+		$query = vsprintf( 'SELECT * FROM %s WHERE %s', [
+			$this->name( $this->getTableName( $class ) ),
+			join( ' AND ', $sql ),
+		] );
+
+		$prepared = $this->getPreparedQuery( $query );
+		return $this->select( $prepared, $values );
+	}
+
+	/**
+	 * Gets all models of the given class from the data store.
+	 *
+	 * @param class-string<ModelInterface> $class The model class name.
+	 *
+	 * @return ModelInterface[] An array of matching models.
+	 */
+	protected function all( string $class ): array {
+		$rows = $this->allRows( $class );
+
+		return array_map( function( array $row ) use ( $class ): ModelInterface {
+			return $this->join( $class, $row );
+		}, $rows );
+	}
+
+	/**
+	 * Gets all models of the given class from the data store.
+	 *
+	 * @param class-string<ModelInterface> $class The model class name.
+	 *
+	 * @return ModelInterface[] An array of matching models.
+	 */
+	protected function allRows( string $class ): array {
+		$table    = $this->getTableName( $class );
+		$query    = sprintf( 'SELECT * FROM %s', $this->name( $table ) );
+		$prepared = $this->getPreparedQuery( $query );
+		return $this->select( $prepared );
 	}
 
 	/* -------------------------------------------------------------------------
@@ -236,7 +361,7 @@ abstract class SqlStore implements StoreInterface {
 		$this->beginTransaction();
 
 		try {
-			$this->setInternal( $model );
+			$this->setSingle( $model );
 			$this->commit();
 		} catch ( Throwable $e ) {
 			$this->rollBack();
@@ -255,16 +380,54 @@ abstract class SqlStore implements StoreInterface {
 	 *
 	 * @return ModelInterface The stored model.
 	 */
-	protected function setInternal( ModelInterface $model ): ModelInterface {
-		$class = get_class( $model );
-		$query = $this->has( $class, $model->id() )
-			? $this->updateRowStatement( $class )
-			: $this->insertRowStatement( $class );
+	protected function setSingle( ModelInterface $model ): ModelInterface {
+		$this->setMulti( [ $model ] );
+		return $model;
+	}
 
-		$values = $this->getModelValues( $model );
-		$rows   = $this->update( $query, $values );
+	/**
+	 * @param ModelInterface[] $models
+	 *
+	 * @return ModelInterface[]
+	 */
+	protected function setMulti( array $models ): array {
+		if ( empty( $model = current( $models ) ) ) {
+			return $models;
+		}
 
-		return $this->updateRelations( $model );
+		$class   = $model::class;
+		$columns = $this->getRowColumns( $class );
+		$columns = array_map( [ $this, 'name' ], $columns );
+		$values  = [];
+
+		// Get the values for multiple models.
+		$insert = array_map( function( ModelInterface $model ) use ( &$values ): string {
+			$row    = $this->split( $model );
+			$values = array_merge( $values, array_values( $row ) );
+			$fill   = array_fill( 0, count( $row ), '?' );
+			return sprintf( '(%s)', join( ', ', $fill ) );
+		}, $models );
+
+		// Assign insert values to update columns.
+		// ToDo: This syntax is deprecated beginning with MySQL 8.0.20, use an alias for the value rows instead.
+		$update = array_map( function( string $column ): string {
+			return "{$column} = VALUES({$column})";
+		}, $columns );
+
+		$table   = $this->name( $this->getTableName( $class ) );
+		$columns = join( ', ', $columns );
+		$insert  = join( ', ', $insert );
+		$update  = join( ', ', $update );
+
+		$sql[] = "INSERT INTO {$table} ({$columns})";
+		$sql[] = "VALUES {$insert}";
+		$sql[] = "ON DUPLICATE KEY UPDATE {$update}";
+
+		$query    = join( ' ', $sql );
+		$prepared = $this->getPreparedQuery( $query );
+		$this->update( $prepared, $values );
+
+		return $models;
 	}
 
 	/**
@@ -279,7 +442,7 @@ abstract class SqlStore implements StoreInterface {
 		$this->beginTransaction();
 
 		try {
-			$result = $this->deleteInternal( $class, $id );
+			$result = $this->deleteSingle( $class, $id );
 			$this->commit();
 			return $result;
 		} catch ( Throwable $e ) {
@@ -296,9 +459,14 @@ abstract class SqlStore implements StoreInterface {
 	 *
 	 * @return bool True if the model existed, false otherwise.
 	 */
-	protected function deleteInternal( string $class, int | string $id ): bool {
-		$query = $this->deleteRowStatement( $class );
-		return (bool) $this->update( $query, [ $id ] );
+	protected function deleteSingle( string $class, int | string $id ): bool {
+		$query = vsprintf( 'DELETE FROM %s WHERE %s = ?', [
+			$this->name( $this->getTableName( $class ) ),
+			$this->name( $class::idProperty() ),
+		] );
+
+		$prepared = $this->getPreparedQuery( $query );
+		return (bool) $this->update( $prepared, [ $id ] );
 	}
 
 	/* -------------------------------------------------------------------------
@@ -328,7 +496,7 @@ abstract class SqlStore implements StoreInterface {
 	}
 
 	/* -------------------------------------------------------------------------
-	 * Create and drop databases
+	 * Create, drop and build databases
 	 * ---------------------------------------------------------------------- */
 
 	/**
@@ -401,16 +569,8 @@ abstract class SqlStore implements StoreInterface {
 			$count += $this->createTable( $name ) ?: $this->alterTable( $name );
 		}
 
-		// Create or alter relation tables (columns + indexes).
-		foreach ( array_keys( $this->relations ) as $name ) {
-			$count += $this->createTable( $name ) ?: $this->alterTable( $name );
-		}
-
-		// Merge all model class names and relation table names.
-		$all = array_merge( $classes, array_keys( $this->relations ) );
-
 		// Set foreign keys after all tables, columns and indexes are in place.
-		foreach ( $all as $name ) {
+		foreach ( $classes as $name ) {
 			$count += $this->alterForeign( $name );
 		}
 
@@ -460,13 +620,8 @@ abstract class SqlStore implements StoreInterface {
 	 * @return string A query to create a database table.
 	 */
 	protected function createTableQuery( string $class ): string {
-		if ( Utils::isModel( $class ) ) {
-			$columns = $this->getModelColumns( $class );
-			$indexes = $this->getModelIndexes( $class );
-		} else {
-			$columns = $this->getRelationColumns( $class );
-			$indexes = $this->getRelationIndexes( $class );
-		}
+		$columns = $this->getModelColumns( $class );
+		$indexes = $this->getModelIndexes( $class );
 
 		// Create columns.
 		foreach ( $columns as $column ) {
@@ -479,7 +634,7 @@ abstract class SqlStore implements StoreInterface {
 		}
 
 		if ( isset( $sql ) ) {
-			$sql   = "\n\t" . join( ",\n\t", $sql ) . "\n";
+			$sql   = join( ', ', $sql );
 			$table = $this->name( $this->getTableName( $class ) );
 			return sprintf( 'CREATE TABLE IF NOT EXISTS %s (%s)', $table, $sql );
 		}
@@ -591,14 +746,14 @@ abstract class SqlStore implements StoreInterface {
 	/**
 	 * Generates a column definition query for the given model property.
 	 *
-	 * @param Property|array $property A model property.
+	 * @param array $column A table column.
 	 *
 	 * @return string A column definition query.
 	 */
-	protected function defineColumnQuery( Property | array $property ): string {
-		$type     = $property['type'];
-		$required = $property['required'] ?? null;
-		$default  = $property['default'] ?? null;
+	protected function defineColumnQuery( array $column ): string {
+		$type     = $column['type'];
+		$required = $column['required'] ?? null;
+		$default  = $column['default'] ?? null;
 
 		// Cast default value.
 		if ( isset( $default ) ) {
@@ -608,7 +763,7 @@ abstract class SqlStore implements StoreInterface {
 		}
 
 		return join( ' ', array_filter( [
-			$this->name( $property['name'] ),
+			$this->name( $column['name'] ),
 			$type,
 			$required ? 'NOT NULL' : null,
 			isset( $default ) ? "DEFAULT {$default}" : null,
@@ -657,45 +812,32 @@ abstract class SqlStore implements StoreInterface {
 	 */
 	protected function getModelColumns( string $class ): array {
 		$properties = $class::properties();
-		$result     = [];
+		$properties = array_filter( $properties, [ $this, 'isColumn' ] );
 
-		foreach ( $properties as $id => $property ) {
-			if ( Utils::isColumn( $property ) ) {
-				$type    = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
-				$child   = $property[ PropertyItem::MODEL ] ?? null;
-				$default = $property[ PropertyItem::DEFAULT ] ?? null;
+		return array_map( function( Property | array $property ) use ( $class ): array {
+			$id      = $property[ PropertyItem::ID ];
+			$type    = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
+			$default = $property[ PropertyItem::DEFAULT ] ?? null;
 
-				if ( empty( is_scalar( $default ) ) ) {
-					$default = null;
-				}
-
-				if ( PropertyType::UUID === $type && true === $default ) {
-					$default = null;
-				}
-
-				if ( is_bool( $default ) ) {
-					$default = (int) $default;
-				}
-
-				$result[ $id ] = [
-					'name'     => $id,
-					'type'     => $this->getColumnType( $property ),
-					'required' => $property[ PropertyItem::REQUIRED ] ?? false,
-					'default'  => $default,
-				];
-
-				// Replace sub-models with foreign keys.
-				if ( PropertyType::OBJECT === $type && Utils::isModel( $child ) ) {
-					if ( $primary = $child::getProperty( $child::idProperty() ) ) {
-						$result[ $id ]['type'] = $this->getColumnType( $primary );
-					}
-				}
-			} elseif ( Utils::isRelation( $property ) ) {
-				$this->addRelation( $class, $property[ PropertyItem::MODEL ], $id );
+			if ( empty( is_scalar( $default ) ) ) {
+				$default = null;
 			}
-		}
 
-		return $result;
+			if ( PropertyType::UUID === $type && true === $default ) {
+				$default = null;
+			}
+
+			if ( is_bool( $default ) ) {
+				$default = (int) $default;
+			}
+
+			return [
+				'name'     => $id,
+				'type'     => $this->getColumnType( $property ),
+				'required' => $property[ PropertyItem::REQUIRED ] ?? false,
+				'default'  => $default,
+			];
+		}, $properties );
 	}
 
 	/**
@@ -734,7 +876,7 @@ abstract class SqlStore implements StoreInterface {
 			case PropertyType::DATETIME:
 				return 'varchar(32)';
 			case PropertyType::DATE:
-				return 'varchar(10)';
+				return 'varchar(16)';
 			case PropertyType::TIME:
 				return 'varchar(8)';
 			case PropertyType::OBJECT:
@@ -745,9 +887,9 @@ abstract class SqlStore implements StoreInterface {
 						}
 					}
 				}
-				return 'text';
+				return 'json';
 			case PropertyType::ARRAY:
-				return 'text';
+				return 'json';
 		}
 		return '';
 	}
@@ -761,9 +903,7 @@ abstract class SqlStore implements StoreInterface {
 	 */
 	protected function calcDeltaColumns( string $class ): array {
 		$tableColumns = $this->getTableColumns( $this->getTableName( $class ) );
-		$modelColumns = Utils::isModel( $class )
-			? $this->getModelColumns( $class )
-			: $this->getRelationColumns( $class );
+		$modelColumns = $this->getModelColumns( $class );
 
 		$common = array_intersect_key( $modelColumns, $tableColumns );
 		$drop   = array_diff_key( $tableColumns, $modelColumns );
@@ -890,30 +1030,25 @@ abstract class SqlStore implements StoreInterface {
 		}
 
 		foreach ( $properties as $id => $property ) {
-			if ( Utils::isColumn( $property ) ) {
+			if ( $name = $property[ PropertyItem::INDEX ] ?? null ) {
+				$result[ $name ]['name']      = $name;
+				$result[ $name ]['type']      = 'INDEX';
+				$result[ $name ]['columns'][] = $id;
+			}
 
-				// Set index.
-				if ( $name = $property[ PropertyItem::INDEX ] ?? null ) {
-					$result[ $name ]['name']      = $name;
-					$result[ $name ]['type']      = 'INDEX';
-					$result[ $name ]['columns'][] = $id;
-				}
+			if ( $name = $property[ PropertyItem::UNIQUE ] ?? null ) {
+				$result[ $name ]['name']      = $name;
+				$result[ $name ]['type']      = 'UNIQUE';
+				$result[ $name ]['columns'][] = $id;
+			}
 
-				// Set unique index.
-				if ( $name = $property[ PropertyItem::UNIQUE ] ?? null ) {
-					$result[ $name ]['name']      = $name;
-					$result[ $name ]['type']      = 'UNIQUE';
-					$result[ $name ]['columns'][] = $id;
-				}
-
-				// Set indexes for foreign keys.
-				if ( Utils::needsForeignKey( $property ) ) {
-					$result[ $id ] = $result[ $id ] ?? [
-						'name'    => $id,
-						'type'    => 'INDEX',
-						'columns' => [ $id ],
-					];
-				}
+			// Set indexes for foreign keys.
+			if ( $this->needsForeignKey( $property ) ) {
+				$result[ $id ] = $result[ $id ] ?? [
+					'name'    => $id,
+					'type'    => 'INDEX',
+					'columns' => [ $id ],
+				];
 			}
 		}
 
@@ -929,9 +1064,7 @@ abstract class SqlStore implements StoreInterface {
 	 */
 	protected function calcDeltaIndexes( string $class ): array {
 		$tableIndexes = $this->getTableIndexes( $this->getTableName( $class ) );
-		$modelIndexes = Utils::isModel( $class )
-			? $this->getModelIndexes( $class )
-			: $this->getRelationIndexes( $class );
+		$modelIndexes = $this->getModelIndexes( $class );
 
 		$common = array_intersect_key( $modelIndexes, $tableIndexes );
 		$drop   = array_diff_key( $tableIndexes, $modelIndexes );
@@ -1113,12 +1246,11 @@ abstract class SqlStore implements StoreInterface {
 	 */
 	protected function getModelForeign( string $class ): array {
 		foreach ( $class::properties() as $id => $property ) {
-			if ( Utils::needsForeignKey( $property ) ) {
+			if ( $this->needsForeignKey( $property ) ) {
 				$model    = $property[ PropertyItem::MODEL ] ?? null;
 				$foreign  = $property[ PropertyItem::FOREIGN ] ?? $model;
 				$required = $property[ PropertyItem::REQUIRED ] ?? false;
-				$relation = $this->getRelationName( $class, $id );
-				$name     = $this->getTableName( $relation );
+				$name     = $this->getTableName( $this->getRelationName( $class, $id ) );
 
 				$result[ $name ] = [
 					'name'    => $name,
@@ -1144,9 +1276,7 @@ abstract class SqlStore implements StoreInterface {
 	 */
 	protected function calcDeltaForeign( string $class ): array {
 		$tableConstraints = $this->getTableForeign( $this->getTableName( $class ) );
-		$modelConstraints = Utils::isModel( $class )
-			? $this->getModelForeign( $class )
-			: $this->getRelationForeign( $class );
+		$modelConstraints = $this->getModelForeign( $class );
 
 		$common = array_intersect_key( $modelConstraints, $tableConstraints );
 		$drop   = array_diff_key( $tableConstraints, $modelConstraints );
@@ -1183,536 +1313,6 @@ abstract class SqlStore implements StoreInterface {
 		return $class . '\\_' . $id;
 	}
 
-	/**
-	 * Gets column definitions for the given relation.
-	 *
-	 * @param string $relation The relation pseudo-class name.
-	 *
-	 * @return array[] An array of column definitions.
-	 */
-	protected function getRelationColumns( string $relation ): array {
-		return $this->relations[ $relation ]['columns'] ?? [];
-	}
-
-	/**
-	 * Gets index definitions for the given relation.
-	 *
-	 * @param string $relation The relation pseudo-class name.
-	 *
-	 * @return array[] An array of index definitions.
-	 */
-	protected function getRelationIndexes( string $relation ): array {
-		return $this->relations[ $relation ]['indexes'] ?? [];
-	}
-
-	/**
-	 * Gets foreign key definitions for the given relation.
-	 *
-	 * @param string $relation The relation pseudo-class name.
-	 *
-	 * @return array[] An array of foreign key definitions.
-	 */
-	protected function getRelationForeign( string $relation ): array {
-		return $this->relations[ $relation ]['foreign'] ?? [];
-	}
-
-	/**
-	 * Enqueues a relation table to be created.
-	 *
-	 * @param class-string<ModelInterface> $parent The parent model class name.
-	 * @param class-string<ModelInterface> $child The child model class name.
-	 * @param string $id The property id containing the child models.
-	 *
-	 * @return bool True if the relation table can be created, false otherwise.
-	 */
-	protected function addRelation( string $parent, string $child, string $id ): bool {
-		$relation = $this->getRelationName( $parent, $id );
-
-		// No need to continue when the relation already exists.
-		if ( array_key_exists( $relation, $this->relations ) ) {
-			return true;
-		}
-
-		// Primary keys.
-		$parentPrimary = $parent::getProperty( $parent::idProperty() );
-		$childPrimary  = $child::getProperty( $child::idProperty() );
-
-		// A valid primary key is required for both sides of the relation table.
-		if ( empty( $parentPrimary && $childPrimary ) ) {
-			return false;
-		}
-
-		// Column names.
-		$parentColumn = '_parent';
-		$childColumn  = '_child';
-		$orderColumn  = '_order';
-
-		// Foreign key names.
-		$parentForeign = $this->getTableName( $relation . '\\' . $parentColumn );
-		$childForeign  = $this->getTableName( $relation . '\\' . $childColumn );
-
-		$columns[ $parentColumn ] = [
-			'name'     => $parentColumn,
-			'type'     => $this->getColumnType( $parentPrimary ),
-			'required' => true,
-		];
-
-		$columns[ $childColumn ] = [
-			'name'     => $childColumn,
-			'type'     => $this->getColumnType( $childPrimary ),
-			'required' => true,
-		];
-
-		$columns[ $orderColumn ] = [
-			'name'     => $orderColumn,
-			'type'     => 'bigint(20)',
-			'required' => false,
-			'default'  => null,
-		];
-
-		$indexes[ $parentColumn ] = [
-			'name'    => $parentColumn,
-			'type'    => 'INDEX',
-			'columns' => [ $parentColumn ],
-		];
-
-		$indexes[ $childColumn ] = [
-			'name'    => $childColumn,
-			'type'    => 'INDEX',
-			'columns' => [ $childColumn ],
-		];
-
-		$foreign[ $parentForeign ] = [
-			'name'    => $parentForeign,
-			'type'    => 'FOREIGN',
-			'columns' => [ $parentColumn ],
-			'table'   => $this->getTableName( $parent ),
-			'fields'  => [ $parent::idProperty() ],
-			'update'  => 'CASCADE',
-			'delete'  => 'CASCADE',
-		];
-
-		$foreign[ $childForeign ] = [
-			'name'    => $childForeign,
-			'type'    => 'FOREIGN',
-			'columns' => [ $childColumn ],
-			'table'   => $this->getTableName( $child ),
-			'fields'  => [ $child::idProperty() ],
-			'update'  => 'CASCADE',
-			'delete'  => 'CASCADE',
-		];
-
-		$this->relations[ $relation ] = compact( 'columns', 'indexes', 'foreign' );
-		return true;
-	}
-
-	/* -------------------------------------------------------------------------
-	 * Select, update, insert and delete relations.
-	 * ---------------------------------------------------------------------- */
-
-	/**
-	 * Generates a query for selecting child models.
-	 *
-	 * @param class-string<ModelInterface> $parent The parent model class name.
-	 * @param class-string<ModelInterface> $child The child model class name.
-	 * @param string $id The property id containing the child models.
-	 * @param mixed $value The parent model id.
-	 *
-	 * @return string A query for selecting child models.
-	 */
-	protected function selectChildrenQuery( string $parent, string $child, string $id, mixed $value = null ): string {
-		$relation = $this->getRelationName( $parent, $id );
-		$table    = $this->name( $this->getTableName( $relation ) );
-		$source   = $this->name( $this->getTableName( $child ) );
-		$primary  = $this->name( $child::idProperty() );
-		$value    = isset( $value ) ? $this->escape( $value ) : '?';
-
-		$sql[] = "SELECT R._parent, C.* FROM {$table} as R JOIN {$source} as C";
-		$sql[] = "ON R._child = C.{$primary} WHERE R._parent IN( {$value} )";
-		$sql[] = "ORDER BY R._order ASC";
-
-		return join( ' ', $sql );
-	}
-
-	/**
-	 * Gets a prepared query for selecting child models.
-	 *
-	 * @param class-string<ModelInterface> $parent The parent model class name.
-	 * @param class-string<ModelInterface> $child The child model class name.
-	 * @param string $id The property id containing the child models.
-	 *
-	 * @return object A prepared query object.
-	 */
-	protected function selectChildrenStatement( string $parent, string $child, string $id ): object {
-		$relation = $this->getRelationName( $parent, $id );
-		$table    = $this->getTableName( $relation );
-
-		if ( empty( $this->queries[ $table ]['children'] ) ) {
-			$query = $this->selectChildrenQuery( $parent, $child, $id );
-			return $this->queries[ $table ]['children'] = $this->prepare( $query );
-		}
-		return $this->queries[ $table ]['children'];
-	}
-
-	/**
-	 * Generates a query for selecting rows from the given relation table.
-	 *
-	 * @param string $table The table name.
-	 * @param string|int|null $value The parent id to select.
-	 *
-	 * @return string A query for selecting relation rows.
-	 */
-	protected function selectRelationQuery( string $table, string | int | null $value = null ): string {
-		return vsprintf( 'SELECT * FROM %s WHERE %s = %s ORDER BY %s ASC', [
-			$this->name( $table ),
-			$this->name( '_parent' ),
-			isset( $value ) ? $this->escape( $value ) : '?',
-			$this->name( '_order' ),
-		] );
-	}
-
-	/**
-	 * Gets a prepared query for selecting rows from the given relation table.
-	 *
-	 * @param string $table The relation table name.
-	 *
-	 * @return object A prepared query object.
-	 */
-	protected function selectRelationStatement( string $table ): object {
-		if ( empty( $this->queries[ $table ]['select'] ) ) {
-			$query = $this->selectRelationQuery( $table );
-			return $this->queries[ $table ]['select'] = $this->prepare( $query );
-		}
-		return $this->queries[ $table ]['select'];
-	}
-
-	/**
-	 * Gets a prepared query for deleting rows from the given relation table.
-	 *
-	 * @param string $table The relation table name.
-	 *
-	 * @return object A prepared query object.
-	 */
-	protected function deleteRelationStatement( string $table ): object {
-		if ( empty( $this->queries[ $table ]['delete'] ) ) {
-			$query = $this->deleteRowQuery( $table, '_parent' );
-			return $this->queries[ $table ]['delete'] = $this->prepare( $query );
-		}
-		return $this->queries[ $table ]['delete'];
-	}
-
-	/**
-	 * Gets a prepared query for inserting rows into the given relation table.
-	 *
-	 * @param string $table The relation table name.
-	 *
-	 * @return object A prepared query object.
-	 */
-	protected function insertRelationStatement( string $table ): object {
-		if ( empty( $this->queries[ $table ]['insert'] ) ) {
-			$query = sprintf( 'INSERT INTO %s VALUES (?, ?, ?)', $this->name( $table ) );
-			return $this->queries[ $table ]['insert'] = $this->prepare( $query );
-		}
-		return $this->queries[ $table ]['insert'];
-	}
-
-	/**
-	 * Updates a relation between parent and child models.
-	 *
-	 * @param ModelInterface $parent The parent model instance.
-	 * @param string $id The property id containing the child models.
-	 */
-	protected function updateRelation( ModelInterface $parent, string $id ): void {
-		$relation = $this->getRelationName( get_class( $parent ), $id );
-		$table    = $this->getTableName( $relation );
-		$children = array_map( [ $this, 'setInternal' ], $parent[ $id ] ?? [] );
-
-		$select = $this->selectRelationStatement( $table );
-		$stored = $this->select( $select, [ $parent->id() ] );
-		$stored = array_map( 'array_values', $stored );
-		$rows   = [];
-
-		foreach ( $children as $order => $child ) {
-			$rows[] = [ $parent->id(), $child->id(), $order ];
-		}
-
-		if ( $stored !== $rows ) {
-			$delete = $this->deleteRelationStatement( $table );
-			$insert = $this->insertRelationStatement( $table );
-			$count  = $this->update( $delete, [ $parent->id() ] );
-
-			foreach ( $rows as $values ) {
-				$count = $this->update( $insert, $values );
-			}
-		}
-	}
-
-	/**
-	 * Updates all relations for the given model.
-	 *
-	 * @param ModelInterface $model The model instance to update relations for.
-	 *
-	 * @return ModelInterface The same model instance for chaining.
-	 */
-	protected function updateRelations( ModelInterface $model ): ModelInterface {
-		$relations = Utils::getRelationProperties( $model::properties() );
-
-		foreach ( array_keys( $relations ) as $id ) {
-			$this->updateRelation( $model, $id );
-		}
-
-		return $model;
-	}
-
-	/* -------------------------------------------------------------------------
-	 * Select, insert, update and delete rows.
-	 * ---------------------------------------------------------------------- */
-
-	/**
-	 * Generates a query to check if a model exists in the data store.
-	 *
-	 * @param string $table The table name.
-	 * @param string $primary The name of the primary key column.
-	 * @param string|int|null $value The model id to check for.
-	 *
-	 * @return string A query to check if a model exists.
-	 */
-	protected function hasRowQuery( string $table, string $primary, string | int | null $value = null ): string {
-		return vsprintf( 'SELECT 1 FROM %s WHERE %s = %s LIMIT 1', [
-			$this->name( $table ),
-			$this->name( $primary ),
-			isset( $value ) ? $this->escape( $value ) : '?',
-		] );
-	}
-
-	/**
-	 * Gets a prepared statement to check if a model exists.
-	 *
-	 * @param class-string<ModelInterface> $class The model class name.
-	 *
-	 * @return object A prepared query object.
-	 */
-	protected function hasRowStatement( string $class ): object {
-		$table = $this->getTableName( $class );
-
-		if ( empty( $this->queries[ $table ]['exists'] ) ) {
-			$query = $this->hasRowQuery( $table, $class::idProperty() );
-			return $this->queries[ $table ]['exists'] = $this->prepare( $query );
-		}
-		return $this->queries[ $table ]['exists'];
-	}
-
-	/**
-	 * Generates a query for selecting a single model from the data store.
-	 *
-	 * @param string $table The table name.
-	 * @param string $primary The name of the primary key column.
-	 * @param string|int|null $value The model id to select.
-	 *
-	 * @return string A query for selecting a single model.
-	 */
-	protected function getRowQuery( string $table, string $primary, string | int | null $value = null ): string {
-		return vsprintf( 'SELECT * FROM %s WHERE %s = %s', [
-			$this->name( $table ),
-			$this->name( $primary ),
-			isset( $value ) ? $this->escape( $value ) : '?',
-		] );
-	}
-
-	/**
-	 * Gets a prepared query for selecting a single model from the data store.
-	 *
-	 * @param class-string<ModelInterface> $class The model class name.
-	 *
-	 * @return object A prepared query object.
-	 */
-	protected function getRowStatement( string $class ): object {
-		$table = $this->getTableName( $class );
-
-		if ( empty( $this->queries[ $table ]['select'] ) ) {
-			$primary = $class::idProperty();
-			$query   = $this->getRowQuery( $table, $primary );
-			return $this->queries[ $table ]['select'] = $this->prepare( $query );
-		}
-		return $this->queries[ $table ]['select'];
-	}
-
-	/**
-	 * Generates a query for a filtered list of models from the data store.
-	 *
-	 * @param string $table The table name.
-	 * @param array $filter Key/value pairs to match model property values.
-	 *
-	 * @return string A query for a filtered list of models.
-	 */
-	protected function filterRowsQuery( string $table, array $filter ): string {
-		$table = $this->name( $table );
-
-		if ( empty( $filter ) ) {
-			return "SELECT * FROM {$table}";
-		}
-
-		$sql = array_map( function( string $key, mixed $value ): string {
-			return match ( true ) {
-				is_scalar( $value )     => sprintf( '(%s = :%s)', $this->name( $key ), $key ),
-				is_array( $value )      => sprintf( '(%s IN (%s))', $this->name( $key ), $this->escape( $value ) ),
-				$value instanceof Range => sprintf( '(%s BETWEEN %s AND %s)',
-					$this->name( $key ),
-					$this->escape( $value->from ),
-					$this->escape( $value->to )
-				),
-			};
-		}, array_keys( $filter ), $filter );
-
-		$sql = join( ' AND ', $sql );
-		return "SELECT * FROM {$table} WHERE {$sql}";
-	}
-
-	/**
-	 * Gets a prepared query for a filtered list of models from the data store.
-	 *
-	 * @param class-string<ModelInterface> $class The model class name.
-	 * @param array $filter Key/value pairs to match model property values.
-	 *
-	 * @return object A prepared query object.
-	 */
-	protected function filterRowsStatement( string $class, array $filter ): object {
-		$table = $this->getTableName( $class );
-		$query = $this->filterRowsQuery( $table, $filter );
-		return $this->prepare( $query );
-	}
-
-	/**
-	 * Generates a query for inserting a model into the given table.
-	 *
-	 * @param string $table The table name.
-	 * @param Property[]|array[] $properties An array of model properties.
-	 * @param array $values The model property values as key/value pairs.
-	 *
-	 * @return string A query for inserting a model into the given table.
-	 */
-	protected function insertRowQuery( string $table, array $properties, array $values = [] ): string {
-		$columns = [];
-
-		foreach ( $properties as $id => $property ) {
-			if ( Utils::isColumn( $property ) ) {
-				$value          = $values[ $id ] ?? null;
-				$columns[ $id ] = $this->name( $id );
-				$values[ $id ]  = isset( $value ) ? $this->escape( $value ) : ':' . $id;
-			}
-		}
-
-		$table   = $this->name( $table );
-		$columns = join( ', ', $columns );
-		$values  = join( ', ', $values );
-
-		return "INSERT INTO {$table} ({$columns}) VALUES ({$values})";
-	}
-
-	/**
-	 * Gets a prepared query for adding a model to the data store.
-	 *
-	 * @param class-string<ModelInterface> $class The model class name.
-	 *
-	 * @return object A prepared query object.
-	 */
-	protected function insertRowStatement( string $class ): object {
-		$table = $this->getTableName( $class );
-
-		if ( empty( $this->queries[ $table ]['insert'] ) ) {
-			$properties = $class::properties();
-			$query      = $this->insertRowQuery( $table, $properties );
-			return $this->queries[ $table ]['insert'] = $this->prepare( $query );
-		}
-		return $this->queries[ $table ]['insert'];
-	}
-
-	/**
-	 * Generates a query for updating a model.
-	 *
-	 * @param string $table The table name.
-	 * @param Property[]|array[] $properties An array of model properties.
-	 * @param string $primary The name of the primary key column.
-	 * @param array $values The model property values as key/value pairs.
-	 *
-	 * @return string A query for updating a model.
-	 */
-	protected function updateRowQuery( string $table, array $properties, string $primary, array $values = [] ): string {
-		$sql = [];
-
-		foreach ( $properties as $id => $property ) {
-			if ( Utils::isColumn( $property ) && $id !== $primary ) {
-				$value = $values[ $id ] ?? null;
-				$value = isset( $value ) ? $this->escape( $value ) : ':' . $id;
-				$name  = $this->name( $id );
-				$sql[] = "{$name} = {$value}";
-			}
-		}
-
-		$value = $values[ $primary ] ?? null;
-		$key   = isset( $value ) ? $this->escape( $value ) : ':' . $primary;
-
-		$table   = $this->name( $table );
-		$primary = $this->name( $primary );
-		$sql     = "\n\t" . join( ",\n\t", $sql ) . "\n";
-
-		return "UPDATE {$table} SET {$sql}WHERE {$primary} = {$key}";
-	}
-
-	/**
-	 * Gets a prepared a query for updating a model.
-	 *
-	 * @param class-string<ModelInterface> $class The model class name.
-	 *
-	 * @return object A prepared query object.
-	 */
-	protected function updateRowStatement( string $class ): object {
-		$table = $this->getTableName( $class );
-
-		if ( empty( $this->queries[ $table ]['update'] ) ) {
-			$properties = $class::properties();
-			$primary    = $class::idProperty();
-			$query      = $this->updateRowQuery( $table, $properties, $primary );
-			return $this->queries[ $table ]['update'] = $this->prepare( $query );
-		}
-		return $this->queries[ $table ]['update'];
-	}
-
-	/**
-	 * Generates a query for deleting a model from the given table.
-	 *
-	 * @param string $table The table name.
-	 * @param string $primary The name of the primary key column.
-	 * @param string|int|null $value The model id to delete.
-	 *
-	 * @return string A query for inserting a model into the given table.
-	 */
-	protected function deleteRowQuery( string $table, string $primary, string | int | null $value = null ): string {
-		return vsprintf( 'DELETE FROM %s WHERE %s = %s', [
-			$this->name( $table ),
-			$this->name( $primary ),
-			isset( $value ) ? $this->escape( $value ) : '?',
-		] );
-	}
-
-	/**
-	 * Gets a prepared query for deleting a model from the data store.
-	 *
-	 * @param class-string<ModelInterface> $class The model class name.
-	 *
-	 * @return object A prepared query object.
-	 */
-	protected function deleteRowStatement( string $class ): object {
-		$table = $this->getTableName( $class );
-
-		if ( empty( $this->queries[ $table ]['delete'] ) ) {
-			$primary = $class::idProperty();
-			$query   = $this->deleteRowQuery( $table, $primary );
-			return $this->queries[ $table ]['delete'] = $this->prepare( $query );
-		}
-		return $this->queries[ $table ]['delete'];
-	}
-
 	/* -------------------------------------------------------------------------
 	 * Helpers
 	 * ---------------------------------------------------------------------- */
@@ -1728,203 +1328,161 @@ abstract class SqlStore implements StoreInterface {
 		return str_replace( '\\', '_', $class );
 	}
 
-	/**
-	 * Gets the model values to be inserted or updated.
-	 *
-	 * @param ModelInterface $model The model instance to be stored.
-	 *
-	 * @return array The model property values as key/value pairs.
-	 */
-	protected function getModelValues( ModelInterface $model ): array {
-		foreach ( $model::properties() as $id => $property ) {
-			if ( Utils::isColumn( $property ) ) {
-				$result[ $id ] = $this->getPropertyValue( $model[ $id ], $property );
-			}
+	protected function getPreparedQuery( string $query ): object {
+		$hash = md5( $query );
+
+		if ( $prepared = $this->prepared[ $hash ] ?? null ) {
+			return $prepared;
 		}
-		return $result ?? [];
+
+		return $this->prepared[ $hash ] = $this->prepare( $query );
+	}
+
+	protected function isColumn( Property | array $property ): bool {
+		return empty( $property[ PropertyType::FUNCTION ] ?? false );
 	}
 
 	/**
-	 * Gets the value of the given property to be store in a database column.
-	 *
-	 * @param mixed $value The property value.
-	 * @param Property|array $property The model property.
-	 *
-	 * @return mixed A value to be store in a database column.
-	 */
-	protected function getPropertyValue( mixed $value, Property | array $property ): mixed {
-		$type  = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
-		$child = $property[ PropertyItem::MODEL ] ?? null;
-
-		// Short-circuit null values.
-		if ( is_null( $value ) ) {
-			return null;
-		}
-
-		// Transform boolean values.
-		if ( is_bool( $value ) ) {
-			return (int) $value;
-		}
-
-		// Transform objects.
-		if ( PropertyType::OBJECT === $type ) {
-			if ( Utils::isModel( $child ) ) {
-				if ( $child::idProperty() ) {
-					return $this->setInternal( $value )->id();
-				}
-				return Utils::encode( $value->data( ModelData::COMPACT ) );
-			}
-			return Utils::encode( $value );
-		}
-
-		// Transform arrays.
-		if ( PropertyType::ARRAY === $type ) {
-			if ( Utils::isModel( $child ) ) {
-				$callback = fn( $item ) => $item->data( ModelData::COMPACT );
-				return Utils::encode( array_map( $callback, $value ) );
-			}
-			return Utils::encode( $value );
-		}
-
-		return $value;
-	}
-
-	/**
-	 * Filters out model properties that are stored in a separate table.
-	 *
-	 * @param Property[]|array[] $properties The model properties.
-	 *
-	 * @return Property[]|array[] Properties that are stored in a separate table.
-	 */
-	protected static function getForeignProperties( array $properties ): array {
-		return array_filter( $properties, function( array $property ): bool {
-			$type = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
-
-			if ( PropertyType::OBJECT === $type || PropertyType::ARRAY === $type ) {
-				$model = $property[ PropertyItem::MODEL ] ?? null;
-				$match = $property[ PropertyItem::MATCH ] ?? null;
-
-				if ( Utils::isModel( $model ) && ( $match || $model::idProperty() ) ) {
-					return true;
-				}
-			}
-			return false;
-		} );
-	}
-
-	/**
-	 * Completely restores the given model including all sub-models.
-	 *
-	 * @param ModelInterface $model The model to restore.
-	 *
-	 * @return ModelInterface The completely restored model.
-	 */
-	public function restoreSingle( ModelInterface $model ): ModelInterface {
-		$properties = static::getForeignProperties( $model::properties() );
-
-		foreach ( $properties as $id => $property ) {
-			$type  = $property[ PropertyItem::TYPE ];
-			$child = $property[ PropertyItem::MODEL ];
-			$value = &$model[ $id ];
-
-			if ( PropertyType::ARRAY === $type ) {
-				if ( $match = $property[ PropertyItem::MATCH ] ?? null ) {
-					$query  = $this->getRowQuery( $this->getTableName( $child ), $match );
-					$select = $this->prepare( $query );
-				} else {
-					$select = $this->selectChildrenStatement( get_class( $model ), $child, $id );
-				}
-				$rows  = $this->select( $select, (array) $model->id() );
-				$value = array_map( [ $child, 'create' ], $rows );
-				static::restoreMulti( $child, $value );
-			} elseif ( PropertyType::OBJECT === $type && isset( $value ) ) {
-				$value = $this->get( $child, $value );
-			}
-		}
-
-		return $model;
-	}
-
-	/**
-	 * Completely restores an array of models including all sub-models.
-	 *
 	 * @param class-string<ModelInterface> $class The model class name.
-	 * @param ModelInterface[]|array[] $models An array of models of the given class.
 	 *
-	 * @return array An array of completely restored models.
+	 * @return string[] The db row columns.
 	 */
-	protected function restoreMulti( string $class, array $models ): array {
-		if ( empty( $models ) ) {
-			return $models;
+	protected function getRowColumns( string $class ): array {
+		$properties = $class::properties();
+		$properties = array_filter( $properties, [ $this, 'isColumn' ] );
+		return array_keys( $properties );
+	}
+
+	/**
+	 * Checks if a model property needs a foreign key.
+	 *
+	 * @param Property|array $property The property.
+	 *
+	 * @return bool
+	 */
+	protected function needsForeignKey( Property | array $property ): bool {
+		$type = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
+
+		if ( PropertyType::ARRAY !== $type && empty( $property[ PropertyItem::MATCH ] ) ) {
+			$model   = $property[ PropertyItem::MODEL ] ?? null;
+			$foreign = $property[ PropertyItem::FOREIGN ] ?? $model;
+
+			if ( Utils::isModel( $foreign ) && $foreign::idProperty() ) {
+				return true;
+			}
 		}
 
-		if ( empty( $properties = static::getForeignProperties( $class::properties() ) ) ) {
-			return $models;
-		}
+		return false;
+	}
 
-		// Model ids.
-		$index = array_column( $models, null, $class::idProperty() );
-		$ids   = array_keys( $index );
+	/**
+	 * Replaces sub-model ids with the sub-model itself.
+	 *
+	 * @param class-string<ModelInterface> $class The class name to join.
+	 * @param array $row The model db row.
+	 */
+	protected function join( string $class, array $row ): ModelInterface {
+		$properties = $class::properties();
+		$modelId    = $row[ $class::idProperty() ] ?? null;
 
-		// Recursively restore sub-models later.
-		$children = [];
+		foreach ( $row as $id => &$value ) {
+			$property = $properties[ $id ];
 
-		// Loop over sub-model properties.
-		foreach ( $properties as $id => $property ) {
-			$type    = $property[ PropertyItem::TYPE ];
-			$child   = $property[ PropertyItem::MODEL ];
-			$primary = $child::idProperty();
+			if ( $child = $property[ PropertyItem::MODEL ] ?? null ) {
+				if ( $value && $child::idProperty() ) {
+					$type = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
 
-			if ( PropertyType::ARRAY === $type ) {
-				if ( $match = $property[ PropertyItem::MATCH ] ?? null ) {
-					$table  = $this->getTableName( $child );
-					$filter = [ $match => $ids ];
-					$query  = $this->filterRowsQuery( $table, $filter );
-				} else {
-					$match  = '_parent';
-					$filter = [ $match => $ids ];
-					$query  = $this->selectChildrenQuery( $class, $child, $id, $filter );
-				}
-
-				foreach ( $this->query( $query, $filter ) as $row ) {
-					$model = $index[ $row[ $match ] ];
-					$sub   = $model[ $id ][] = $children[ $child ][] = new $child( $row );
-				}
-			} elseif ( PropertyType::OBJECT === $type ) {
-				$values = array_column( $models, $id );
-				$values = array_values( array_filter( $values ) );
-
-				if ( empty( $values ) ) {
-					continue;
-				}
-
-				$filter = [ $child::idProperty() => $values ];
-				$query  = $this->filterRowsStatement( $child, $filter );
-				$group  = Utils::group( $models, $id );
-
-				foreach ( $this->select( $query, $filter ) as $row ) {
-					foreach ( $group[ $row[ $primary ] ] as $model ) {
-						$model[ $id ] = $children[ $child ][] = new $child( $row );
+					if ( PropertyType::OBJECT === $type ) {
+						$value = $this->get( $child, $value );
+					} elseif ( PropertyType::ARRAY === $type ) {
+						if ( $match = $property[ PropertyItem::MATCH ] ?? null ) {
+							$filter = [ $match => $modelId ];
+							$value  = $this->filter( $child, $filter );
+						} else {
+							$ids   = json_decode( $value, true );
+							$value = $ids ? $this->list( $child, $ids ) : [];
+						}
 					}
 				}
 			}
 		}
 
-		// Recursively restore sub-models.
-		foreach ( $children as $child => $collection ) {
-			static::restoreMulti( $child, $collection );
+		return new $class( $row );
+	}
+
+	/**
+	 * Splits a model into separate sub-models and stores them.
+	 *
+	 * @param ModelInterface $model The model instance to be stored.
+	 *
+	 * @return array The model data to be stored on the db.
+	 */
+	protected function split( ModelInterface $model ): array {
+		$properties = $model::properties();
+		$result     = [];
+
+		foreach ( $model as $id => $value ) {
+			$property = $properties[ $id ];
+
+			if ( empty( $this->isColumn( $property ) ) ) {
+				continue;
+			}
+
+			if ( is_null( $value ) ) {
+				$result[ $id ] = $value;
+				continue;
+			}
+
+			// Transform boolean values.
+			if ( is_bool( $value ) ) {
+				$result[ $id ] = (int) $value;
+				continue;
+			}
+
+			$type  = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
+			$child = $property[ PropertyItem::MODEL ] ?? null;
+
+			// Transform objects.
+			if ( PropertyType::OBJECT === $type ) {
+				if ( $child ) {
+					if ( $child::idProperty() ) {
+						$value = $this->setSingle( $value )->id();
+					} else {
+						$value = Utils::encode( $value->data( ModelData::COMPACT ) );
+					}
+				} else {
+					$value = Utils::encode( $value );
+				}
+			}
+
+			// Transform arrays.
+			if ( PropertyType::ARRAY === $type ) {
+				if ( $child ) {
+					if ( $child::idProperty() ) {
+						$this->setMulti( $value );
+						$callback = fn( $item ) => $item->id();
+					} else {
+						$callback = fn( $item ) => $item->data( ModelData::COMPACT );
+					}
+					$value = Utils::encode( array_map( $callback, $value ) );
+				} else {
+					$value = Utils::encode( $value );
+				}
+			}
+
+			$result[ $id ] = $value;
 		}
 
-		return $models;
+		return $result;
 	}
 
 	/**
 	 * Extract all sub-models from the given models.
 	 *
-	 * @param ModelInterface[]|string[] $models An array of model class names.
-	 * @param ModelInterface[]|string[] $result An array of all model and sub-model class names.
+	 * @param class-string<ModelInterface>[] $models An array of model class names.
+	 * @param class-string<ModelInterface>[] $result An array of all model and sub-model class names.
 	 *
-	 * @return ModelInterface[]|string[] An array of all model and sub-model class names.
+	 * @return class-string<ModelInterface>[] An array of all model and sub-model class names.
 	 */
 	protected function getAllModels( array $models, array &$result = [] ): array {
 		$result = $result ?: $models;
