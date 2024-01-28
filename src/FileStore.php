@@ -10,7 +10,6 @@
 declare( strict_types = 1 );
 namespace Peroks\Model\Store;
 
-use Peroks\Model\ModelData;
 use Peroks\Model\PropertyItem;
 use Peroks\Model\PropertyType;
 
@@ -87,8 +86,7 @@ class FileStore implements StoreInterface {
 	public function get( string $class, int | string $id ): ModelInterface | null {
 		if ( $this->has( $class, $id ) ) {
 			$data = array_replace( $this->data[ $class ][ $id ] ?? [], $this->changed[ $class ][ $id ] ?? [] );
-			$data = $this->join( $class, $data );
-			return new $class( $data );
+			return $this->join( $class, $data );
 		}
 		return null;
 	}
@@ -109,7 +107,7 @@ class FileStore implements StoreInterface {
 		}
 
 		$result = array_map( function( array $data ) use ( $class ): ModelInterface {
-			return new $class( $this->join( $class, $data ) );
+			return $this->join( $class, $data );
 		}, $result );
 
 		return array_values( $result );
@@ -150,7 +148,7 @@ class FileStore implements StoreInterface {
 		}
 
 		$result = array_map( function( array $data ) use ( $class ): ModelInterface {
-			return new $class( $this->join( $class, $data ) );
+			return $this->join( $class, $data );
 		}, $result );
 
 		return array_values( $result );
@@ -170,8 +168,7 @@ class FileStore implements StoreInterface {
 	public function set( ModelInterface $model ): ModelInterface {
 		$id    = $model->id();
 		$class = get_class( $model );
-		$data  = $model->validate( true )->data( ModelData::COMPACT );
-		$data  = $this->split( $model, $data );
+		$data  = $this->split( $model->validate( true ) );
 
 		$this->changed[ $class ][ $id ] = $data;
 		unset( $this->deleted[ $class ][ $id ] );
@@ -206,50 +203,59 @@ class FileStore implements StoreInterface {
 	 * @param class-string<ModelInterface> $class The class name to join.
 	 * @param array $data The model data.
 	 */
-	protected function join( string $class, array $data ): array {
+	protected function join( string $class, array $data ): ModelInterface {
 		$properties = $class::properties();
 
 		foreach ( $data as $key => &$value ) {
 			$property = $properties[ $key ];
 
-			if ( $class = $property[ PropertyItem::MODEL ] ?? null ) {
+			if ( $child = $property[ PropertyItem::MODEL ] ?? null ) {
 				if ( $value && $class::idProperty() ) {
-					$get   = fn( int | string $id ): ModelInterface => $this->get( $class, $id );
 					$value = match ( $property[ PropertyItem::TYPE ] ) {
-						PropertyType::OBJECT => $this->get( $class, $value ),
-						PropertyType::ARRAY  => array_filter( array_map( $get, $value ) ),
+						PropertyType::OBJECT => $this->get( $child, $value ),
+						PropertyType::ARRAY  => $this->list( $child, $value ),
 					};
 				}
 			}
 		}
 
-		return $data;
+		return new $class( $data );
 	}
 
 	/**
-	 * Replaces sub-models with their ids before storing.
+	 * Splits a model into separate sub-models and stores them.
 	 *
 	 * @param ModelInterface $model The model to split.
-	 * @param array $data The model data.
 	 */
-	protected function split( ModelInterface $model, array $data ): array {
+	protected function split( ModelInterface $model ): array {
 		$properties = $model::properties();
+		$result     = [];
 
-		foreach ( $data as $id => &$value ) {
+		foreach ( $model as $id => $value ) {
 			$property = $properties[ $id ];
 
+			if ( $property[ PropertyType::FUNCTION ] ?? null ) {
+				continue;
+			}
+
+			if ( is_null( $value ) ) {
+				$result[ $id ] = $value;
+				continue;
+			}
+
 			if ( $class = $property[ PropertyItem::MODEL ] ?? null ) {
-				if ( $value && $class::idProperty() ) {
-					$set   = fn( ModelInterface $item ): int | string => $this->set( $item )->id();
+				if ( $class::idProperty() ) {
 					$value = match ( $property[ PropertyItem::TYPE ] ) {
-						PropertyType::OBJECT => $this->set( $model[ $id ] )->id(),
-						PropertyType::ARRAY  => array_map( $set, $model[ $id ] )
+						PropertyType::OBJECT => $this->set( $value )->id(),
+						PropertyType::ARRAY  => array_map( fn( $item ) => $this->set( $item )->id(), $value )
 					};
 				}
 			}
+
+			$result[ $id ] = $value;
 		}
 
-		return $data;
+		return $result;
 	}
 
 	/* -------------------------------------------------------------------------
