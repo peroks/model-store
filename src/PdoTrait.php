@@ -17,7 +17,7 @@ use PDO, PDOException, PDOStatement;
 /**
  * PDO abstraction layer for storing and retrieving models.
  */
-Trait PdoTrait {
+trait PdoTrait {
 
 	/**
 	 * @var object<PDO> $db The database object.
@@ -33,35 +33,21 @@ Trait PdoTrait {
 	 *
 	 * @param object $connect Connections parameters: host, user, pass, name, port, socket.
 	 *
-	 * @return bool True on success, null on failure to create a connection.
+	 * @return PDO A PDO db instance.
 	 */
-	protected function connect( object $connect ): bool {
-		$args = [
+	protected function connect( object $connect ): object {
+		$dsn = "mysql:charset=utf8mb4;host={$connect->host}";
+		$db  = new PDO( $dsn, $connect->user, $connect->pass, [
 			PDO::ATTR_ERRMODE          => PDO::ERRMODE_EXCEPTION,
 			PDO::ATTR_PERSISTENT       => true,
 			PDO::ATTR_EMULATE_PREPARES => false,
-		];
+		] );
 
-		// Delete database.
-		if ( false ) {
-			$dsn = "mysql:charset=utf8mb4;host={$connect->host}";
-			$db  = new PDO( $dsn, $connect->user, $connect->pass, $args );
-			$db->exec( $this->dropDatabaseQuery( $connect->name ) );
-		}
-
-		try {
-			$dsn = "mysql:charset=utf8mb4;host={$connect->host};dbname={$connect->name}";
-			$db  = new PDO( $dsn, $connect->user, $connect->pass, $args );
-		} catch ( PDOException ) {
-			$dsn = "mysql:charset=utf8mb4;host={$connect->host}";
-			$db  = new PDO( $dsn, $connect->user, $connect->pass, $args );
-
-			$db->exec( $this->createDatabaseQuery( $connect->name ) );
+		if ( ! empty( $connect->name ) ) {
 			$db->exec( "USE {$connect->name}" );
 		}
 
-		$this->db = $db;
-		return true;
+		return $db;
 	}
 
 	/**

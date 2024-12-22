@@ -12,6 +12,7 @@
 declare( strict_types = 1 );
 namespace Peroks\Model\Store;
 
+use Exception;
 use Peroks\Model\ModelData;
 use Peroks\Model\Property;
 use Peroks\Model\PropertyItem;
@@ -41,9 +42,17 @@ abstract class SqlStore implements StoreInterface {
 	 *
 	 * @param array|object $connect Connections parameters: host, user, pass, name, port, socket.
 	 */
-	public function __construct( array | object $connect ) {
+	public function __construct( array | object $connect, array $models ) {
+		$connect      = (object) $connect;
 		$this->dbname = $connect->name;
-		$this->connect( (object) $connect );
+
+		try {
+			$this->db = $this->connect( $connect );
+		} catch ( Exception $e ) {
+			unset( $connect->name );
+			$this->db = $this->connect( $connect );
+			$this->build( $models );
+		}
 	}
 
 	/* -------------------------------------------------------------------------
@@ -55,9 +64,9 @@ abstract class SqlStore implements StoreInterface {
 	 *
 	 * @param object $connect Connections parameters: host, user, pass, name, port, socket.
 	 *
-	 * @return bool True on success, null on failure to create a connection.
+	 * @return object A db instance.
 	 */
-	abstract protected function connect( object $connect ): bool;
+	abstract protected function connect( object $connect ): object;
 
 	/**
 	 * Executes a single query and returns the number of affected rows.
@@ -482,6 +491,9 @@ abstract class SqlStore implements StoreInterface {
 	 * @return bool
 	 */
 	public function build( array $models, array $options = [] ): bool {
+		$this->exec( $this->createDatabaseQuery( $this->dbname ) );
+		$this->exec( "USE {$this->dbname}" );
+
 		$models = $this->getAllModels( $models );
 		return (bool) $this->buildDatabase( $models );
 	}
