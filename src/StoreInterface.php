@@ -10,6 +10,9 @@
 declare( strict_types = 1 );
 namespace Peroks\Model\Store;
 
+/**
+ * Interface for storing and retrieving models from a data store.
+ */
 interface StoreInterface {
 
 	/* -------------------------------------------------------------------------

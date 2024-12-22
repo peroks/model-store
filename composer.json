@@ -1,9 +1,10 @@
 {
 	"name": "peroks/model-store",
 	"description": "Model Store: Permanent data store for models.",
+	"version": "0.1.1",
 	"license": "MIT",
 	"type": "library",
-	"version": "0.1.1",
+	"minimum-stability": "stable",
 	"keywords": [
 		"json",
 		"database",
@@ -19,6 +20,11 @@
 			"homepage": "https://github.com/peroks"
 		}
 	],
+	"autoload": {
+		"psr-4": {
+			"Peroks\\Model\\Store\\": "src/"
+		}
+	},
 	"require": {
 		"php": "^8.2",
 		"peroks/model": "^1.0"
@@ -38,12 +44,6 @@
 			"url": "../*",
 			"canonical": false,
 			"symlink": true
-		}
-	},
-	"minimum-stability": "stable",
-	"autoload": {
-		"psr-4": {
-			"Peroks\\Model\\Store\\": "src/"
 		}
 	},
 	"config": {

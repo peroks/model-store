@@ -10,6 +10,9 @@
 declare( strict_types = 1 );
 namespace Peroks\Model\Store;
 
+/**
+ * An extended model interface for use in data stores.
+ */
 interface ModelInterface extends \Peroks\Model\ModelInterface {
 
 	/**
