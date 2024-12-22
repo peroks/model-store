@@ -10,6 +10,9 @@
 declare( strict_types = 1 );
 namespace Peroks\Model\Store;
 
+/**
+ * The store model class.
+ */
 class Model extends \Peroks\Model\Model implements ModelInterface {
 
 	/**

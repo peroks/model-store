@@ -1,10 +1,9 @@
 {
 	"name": "peroks/model-store",
-	"type": "library",
 	"description": "Model Store: Permanent data store for models.",
-	"minimum-stability": "stable",
-	"version": "0.1.1",
 	"license": "MIT",
+	"type": "library",
+	"version": "0.1.1",
 	"keywords": [
 		"json",
 		"database",
@@ -20,26 +19,57 @@
 			"homepage": "https://github.com/peroks"
 		}
 	],
+	"require": {
+		"php": "^8.2",
+		"peroks/model": "^1.0"
+	},
+	"require-dev": {
+		"ergebnis/composer-normalize": "^2.45.0",
+		"wp-coding-standards/wpcs": "^3.1.0"
+	},
+	"suggest": {
+		"ext-intl": "*",
+		"ext-mysqli": "Required for native MySQL model stores",
+		"ext-pdo": "Required for PDO model stores"
+	},
+	"repositories": {
+		"development": {
+			"type": "path",
+			"url": "../*",
+			"canonical": false,
+			"symlink": true
+		}
+	},
+	"minimum-stability": "stable",
 	"autoload": {
 		"psr-4": {
 			"Peroks\\Model\\Store\\": "src/"
 		}
 	},
-	"repositories": [
-		{
-			"type": "path",
-			"url": "../*",
-			"symlink": true,
-			"canonical": false
+	"config": {
+		"allow-plugins": {
+			"dealerdirect/phpcodesniffer-composer-installer": true,
+			"ergebnis/composer-normalize": true
+		},
+		"platform": {
+			"php": "8.2"
 		}
-	],
-	"require": {
-		"peroks/model": "^1.0",
-		"php": "^8.2"
 	},
-	"suggest": {
-		"ext-intl": "*",
-		"ext-pdo": "Required for PDO model stores",
-		"ext-mysqli": "Required for native MySQL model stores"
+	"scripts": {
+		"build": [
+			"@composer install"
+		],
+		"build-for-deploy": [
+			"@composer install --no-dev"
+		],
+		"format": [
+			"./vendor/bin/phpcbf ."
+		],
+		"lint": [
+			"./vendor/bin/phpcs ."
+		],
+		"normalize": [
+			"@composer normalize"
+		]
 	}
 }

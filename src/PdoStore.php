@@ -12,6 +12,9 @@
 declare( strict_types = 1 );
 namespace Peroks\Model\Store;
 
+/**
+ * Class for storing and retrieving models from a PDO database.
+ */
 class PdoStore extends SqlStore implements StoreInterface {
 	use PdoTrait;
 }

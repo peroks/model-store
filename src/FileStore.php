@@ -13,6 +13,9 @@ namespace Peroks\Model\Store;
 use Peroks\Model\PropertyItem;
 use Peroks\Model\PropertyType;
 
+/**
+ * Class for storing and retrieving models from a JSON data store.
+ */
 class FileStore implements StoreInterface {
 
 	/**
@@ -44,16 +47,38 @@ class FileStore implements StoreInterface {
 	 * Constructor and destructor
 	 * ---------------------------------------------------------------------- */
 
-	public static function load( $source, $options = [] ): self {
+	/**
+	 * Loads a file model store.
+	 *
+	 * @param string $source Full path to the JSON source file.
+	 * @param array $options An assoc array of options.
+	 */
+	public static function load( string $source, array $options = [] ): static {
 		return new static( $source, $options );
 	}
 
-	public function __construct( $source, $options = [] ) {
-		$this->source = $source;
-		$this->init( $options );
-		$this->open();
+	/**
+	 * Constructor.
+	 *
+	 * @param string $source Full path to the JSON source file.
+	 * @param array $options An assoc array of options.
+	 */
+	public function __construct( string $source, array $options = [] ) {
+		$default = [
+			'force_add'    => false,
+			'force_update' => false,
+			'json_encode'  => JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
+			'json_decode'  => JSON_THROW_ON_ERROR,
+		];
+
+		$this->source  = $source;
+		$this->options = (object) array_replace( $default, $options );
+		$this->data    = $this->read( $this->source );
 	}
 
+	/**
+	 * Destructor
+	 */
 	public function __destruct() {
 		$this->save();
 	}
@@ -70,7 +95,7 @@ class FileStore implements StoreInterface {
 	 *
 	 * @return bool True if the model exists, false otherwise.
 	 */
-	public function has( string $class, int | string $id ): bool {
+	public function has( string $class, int|string $id ): bool {
 		return isset( $this->data[ $class ][ $id ] )
 			|| isset( $this->changed[ $class ][ $id ] );
 	}
@@ -83,7 +108,7 @@ class FileStore implements StoreInterface {
 	 *
 	 * @return ModelInterface|null The matching model or null if not found.
 	 */
-	public function get( string $class, int | string $id ): ModelInterface | null {
+	public function get( string $class, int|string $id ): ModelInterface|null {
 		if ( $this->has( $class, $id ) ) {
 			$data = array_replace( $this->data[ $class ][ $id ] ?? [], $this->changed[ $class ][ $id ] ?? [] );
 			return $this->join( $class, $data );
@@ -106,7 +131,7 @@ class FileStore implements StoreInterface {
 			$result = array_intersect_key( $result, array_flip( $ids ) );
 		}
 
-		$result = array_map( function( array $data ) use ( $class ): ModelInterface {
+		$result = array_map( function ( array $data ) use ( $class ): ModelInterface {
 			return $this->join( $class, $data );
 		}, $result );
 
@@ -128,7 +153,7 @@ class FileStore implements StoreInterface {
 			$scalar_filter = array_filter( $filter, 'is_scalar' );
 			$rest_filter   = array_diff_key( $filter, $scalar_filter );
 
-			$result = array_filter( $result, function( array $data ) use ( $scalar_filter, $rest_filter ): bool {
+			$result = array_filter( $result, function ( array $data ) use ( $scalar_filter, $rest_filter ): bool {
 				if ( $scalar_filter && array_intersect_assoc( $scalar_filter, $data ) !== $scalar_filter ) {
 					return false;
 				}
@@ -147,7 +172,7 @@ class FileStore implements StoreInterface {
 			} );
 		}
 
-		$result = array_map( function( array $data ) use ( $class ): ModelInterface {
+		$result = array_map( function ( array $data ) use ( $class ): ModelInterface {
 			return $this->join( $class, $data );
 		}, $result );
 
@@ -183,7 +208,7 @@ class FileStore implements StoreInterface {
 	 *
 	 * @return bool True if the model existed, false otherwise.
 	 */
-	public function delete( string $class, int | string $id ): bool {
+	public function delete( string $class, int|string $id ): bool {
 		if ( $this->has( $class, $id ) ) {
 			unset( $this->data[ $class ][ $id ] );
 			unset( $this->changed[ $class ][ $id ] );
@@ -198,7 +223,7 @@ class FileStore implements StoreInterface {
 	 * ---------------------------------------------------------------------- */
 
 	/**
-	 * Replaces sum-model ids with the sub-model itself.
+	 * Replaces sub-model ids with the sub-model itself.
 	 *
 	 * @param class-string<ModelInterface> $class The class name to join.
 	 * @param array $data The model data.
@@ -284,109 +309,8 @@ class FileStore implements StoreInterface {
 	}
 
 	/* -------------------------------------------------------------------------
-	 * Class initialization
-	 * ---------------------------------------------------------------------- */
-
-	/**
-	 * @param array|object $options
-	 */
-	public function init( array | object $options ): void {
-		$default = [
-			'force_add'    => false,
-			'force_update' => false,
-			'json_encode'  => JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
-			'json_decode'  => JSON_THROW_ON_ERROR,
-		];
-
-		$this->options = (object) array_replace( $default, (array) $options );
-	}
-
-	/* -------------------------------------------------------------------------
 	 * File handling
 	 * ---------------------------------------------------------------------- */
-
-	/**
-	 * Reads a JSON source file into the data store.
-	 *
-	 * @return array The JSON decoded data.
-	 */
-	public function read( $source ): array {
-		if ( is_readable( $source ) ) {
-			if ( $content = file_get_contents( $source ) ) {
-				return json_decode( $content, true, 64, $this->options->json_decode );
-			}
-		}
-		return [];
-	}
-
-	/**
-	 * Imports data from a source
-	 *
-	 * @param FileStore|array|string $source The source containing the data to import.
-	 */
-	public function import( mixed $source ): void {
-		if ( is_array( $source ) ) {
-			$data = $source;
-		} elseif ( $source instanceof self ) {
-			$data = $source->export();
-		} elseif ( is_readable( $source ) ) {
-			$data = $this->read( $source );
-		} elseif ( is_string( $source ) ) {
-			if ( $result = json_decode( $source, true ) && JSON_ERROR_NONE == json_last_error() ) {
-				$data = $result;
-			}
-		}
-
-		/** @var ModelInterface $class */
-		foreach ( $data ?? [] as $class => $pairs ) {
-			foreach ( $pairs as $inst ) {
-				$this->set( $class::create( $inst ) );
-			}
-		}
-	}
-
-	public function export(): array {
-		return $this->merge( $this->data );
-	}
-
-	/**
-	 * Writes the data store to a JSON file.
-	 *
-	 * @param array $data The data to be stored as a JSON source.
-	 *
-	 * @return bool True if successful, false otherwise.
-	 */
-	public function write( $source, array $data ): bool {
-		if ( $content = json_encode( $data, $this->options->json_encode, 64 ) ) {
-			return is_int( file_put_contents( $source, $content, LOCK_EX ) );
-		}
-		return false;
-	}
-
-	/**
-	 * Merges the data with the changes.
-	 *
-	 * @param array $data The data to be merged.
-	 */
-	public function merge( array $data ): array {
-		foreach ( $this->changed as $class => $models ) {
-			foreach ( $models as $id => $model ) {
-				$data[ $class ][ $id ] = $model;
-			}
-		}
-
-		foreach ( $this->deleted as $class => $models ) {
-			foreach ( $models as $id => $model ) {
-				unset( $data[ $class ][ $id ] );
-			}
-		}
-
-		return $data;
-	}
-
-	public function open(): void {
-		$this->data = $this->read( $this->source );
-	}
 
 	/**
 	 * Saves the updated data to a JSON file.
@@ -409,10 +333,100 @@ class FileStore implements StoreInterface {
 		return true;
 	}
 
+	/**
+	 * Imports data from a source.
+	 *
+	 * @param FileStore|array|string $source The source containing the data to import.
+	 */
+	public function import( mixed $source ): void {
+		if ( is_array( $source ) ) {
+			$data = $source;
+		} elseif ( $source instanceof self ) {
+			$data = $source->export();
+		} elseif ( is_readable( $source ) ) {
+			$data = $this->read( $source );
+		} elseif ( is_string( $source ) ) {
+			if ( $result = json_decode( $source, true ) && JSON_ERROR_NONE === json_last_error() ) {
+				$data = $result;
+			}
+		}
+
+		/** @var ModelInterface $class */
+		foreach ( $data ?? [] as $class => $pairs ) {
+			foreach ( $pairs as $inst ) {
+				$this->set( $class::create( $inst ) );
+			}
+		}
+	}
+
+	/**
+	 * Gets the updated model data.
+	 */
+	public function export(): array {
+		return $this->merge( $this->data );
+	}
+
+	/**
+	 * Reads a JSON source file into the data store.
+	 *
+	 * @param string $source Full path to the JSON source file.
+	 *
+	 * @return array The JSON decoded data.
+	 */
+	protected function read( string $source ): array {
+		if ( is_readable( $source ) ) {
+			if ( $content = file_get_contents( $source ) ) {
+				return json_decode( $content, true, 64, $this->options->json_decode );
+			}
+		}
+		return [];
+	}
+
+	/**
+	 * Updates the data store with changes and deletions.
+	 *
+	 * @param array $data The data to be merged.
+	 */
+	protected function merge( array $data ): array {
+		foreach ( $this->changed as $class => $models ) {
+			foreach ( $models as $id => $model ) {
+				$data[ $class ][ $id ] = $model;
+			}
+		}
+
+		foreach ( $this->deleted as $class => $models ) {
+			foreach ( $models as $id => $model ) {
+				unset( $data[ $class ][ $id ] );
+			}
+		}
+
+		return $data;
+	}
+
+	/**
+	 * Writes the data store to a JSON file.
+	 *
+	 * @param string $source Full path to the JSON source file.
+	 * @param array $data The data to be stored as a JSON source.
+	 *
+	 * @return bool True if successful, false otherwise.
+	 */
+	protected function write( string $source, array $data ): bool {
+		if ( $content = json_encode( $data, $this->options->json_encode, 64 ) ) {
+			return is_int( file_put_contents( $source, $content, LOCK_EX ) );
+		}
+		return false;
+	}
+
 	/* -------------------------------------------------------------------------
 	 * Utils
 	 * ---------------------------------------------------------------------- */
 
+	/**
+	 * Sorts the model data.
+	 *
+	 * @param array $data The model store data.
+	 */
 	public static function sort( array &$data ): bool {
 		return ksort( $data, SORT_NATURAL );
 	}

@@ -20,6 +20,9 @@ use Peroks\Model\PropertyType;
 use Peroks\Model\Utils;
 use Throwable;
 
+/**
+ * Class for storing and retrieving models from a SQL database.
+ */
 abstract class SqlStore implements StoreInterface {
 
 	/**
@@ -41,8 +44,9 @@ abstract class SqlStore implements StoreInterface {
 	 * Constructor.
 	 *
 	 * @param array|object $connect Connections parameters: host, user, pass, name, port, socket.
+	 * @param array<Model> $models An array of Model class names.
 	 */
-	public function __construct( array | object $connect, array $models ) {
+	public function __construct( array|object $connect, array $models ) {
 		$connect      = (object) $connect;
 		$this->dbname = $connect->name;
 
@@ -167,7 +171,7 @@ abstract class SqlStore implements StoreInterface {
 	 *
 	 * @return bool True if the model exists, false otherwise.
 	 */
-	public function has( string $class, int | string $id ): bool {
+	public function has( string $class, int|string $id ): bool {
 		$query = vsprintf( 'SELECT 1 FROM %s WHERE %s = ? LIMIT 1', [
 			$this->name( $this->getTableName( $class ) ),
 			$this->name( $class::idProperty() ),
@@ -187,7 +191,7 @@ abstract class SqlStore implements StoreInterface {
 	 *
 	 * @return ModelInterface|null The matching model or null if not found.
 	 */
-	public function get( string $class, int | string $id ): ModelInterface | null {
+	public function get( string $class, int|string $id ): ModelInterface|null {
 		$query = vsprintf( 'SELECT * FROM %s WHERE %s = ?', [
 			$this->name( $this->getTableName( $class ) ),
 			$this->name( $class::idProperty() ),
@@ -221,7 +225,7 @@ abstract class SqlStore implements StoreInterface {
 
 		$rows = $this->listRows( $class, $ids );
 
-		return array_map( function( array $row ) use ( $class ): ModelInterface {
+		return array_map( function ( array $row ) use ( $class ): ModelInterface {
 			return $this->join( $class, $row );
 		}, $rows );
 	}
@@ -260,7 +264,7 @@ abstract class SqlStore implements StoreInterface {
 	public function filter( string $class, array $filter = [] ): array {
 		$rows = $this->filterRows( $class, $filter );
 
-		return array_map( function( array $row ) use ( $class ): ModelInterface {
+		return array_map( function ( array $row ) use ( $class ): ModelInterface {
 			return $this->join( $class, $row );
 		}, $rows );
 	}
@@ -279,7 +283,7 @@ abstract class SqlStore implements StoreInterface {
 		}
 
 		$properties = $class::properties();
-		$properties = array_filter( $properties, function( Property | array $property ) {
+		$properties = array_filter( $properties, function ( Property|array $property ) {
 			if ( PropertyType::ARRAY === $property[ PropertyItem::TYPE ] ?? null ) {
 				if ( $child = $property[ PropertyItem::MODEL ] ?? null ) {
 					return (bool) $child::idProperty();
@@ -292,7 +296,7 @@ abstract class SqlStore implements StoreInterface {
 		$json_filter  = array_intersect_key( $filter, $properties );
 		$values       = [];
 
-		$sql = array_map( function( string $key, mixed $value ) use ( &$values ): string {
+		$sql = array_map( function ( string $key, mixed $value ) use ( &$values ): string {
 			if ( is_array( $value ) ) {
 				$values = array_merge( $values, $value );
 				$fill   = join( ', ', array_fill( 0, count( $value ), '?' ) );
@@ -335,7 +339,7 @@ abstract class SqlStore implements StoreInterface {
 	protected function all( string $class ): array {
 		$rows = $this->allRows( $class );
 
-		return array_map( function( array $row ) use ( $class ): ModelInterface {
+		return array_map( function ( array $row ) use ( $class ): ModelInterface {
 			return $this->join( $class, $row );
 		}, $rows );
 	}
@@ -364,6 +368,7 @@ abstract class SqlStore implements StoreInterface {
 	 * @param ModelInterface $model The model to store.
 	 *
 	 * @return ModelInterface The stored model.
+	 * @throws Throwable
 	 */
 	public function set( ModelInterface $model ): ModelInterface {
 		$model->validate( true );
@@ -395,7 +400,9 @@ abstract class SqlStore implements StoreInterface {
 	}
 
 	/**
-	 * @param ModelInterface[] $models
+	 * Stores an array of models.
+	 *
+	 * @param ModelInterface[] $models An array of model to store.
 	 *
 	 * @return ModelInterface[]
 	 */
@@ -410,7 +417,7 @@ abstract class SqlStore implements StoreInterface {
 		$values  = [];
 
 		// Get the values for multiple models.
-		$insert = array_map( function( ModelInterface $model ) use ( &$values ): string {
+		$insert = array_map( function ( ModelInterface $model ) use ( &$values ): string {
 			$row    = $this->split( $model );
 			$values = array_merge( $values, array_values( $row ) );
 			$fill   = array_fill( 0, count( $row ), '?' );
@@ -419,7 +426,7 @@ abstract class SqlStore implements StoreInterface {
 
 		// Assign insert values to update columns.
 		// ToDo: This syntax is deprecated beginning with MySQL 8.0.20, use an alias for the value rows instead.
-		$update = array_map( function( string $column ): string {
+		$update = array_map( function ( string $column ): string {
 			return "{$column} = VALUES({$column})";
 		}, $columns );
 
@@ -446,8 +453,9 @@ abstract class SqlStore implements StoreInterface {
 	 * @param int|string $id The model id.
 	 *
 	 * @return bool True if the model existed, false otherwise.
+	 * @throws Throwable
 	 */
-	public function delete( string $class, int | string $id ): bool {
+	public function delete( string $class, int|string $id ): bool {
 		$this->beginTransaction();
 
 		try {
@@ -468,7 +476,7 @@ abstract class SqlStore implements StoreInterface {
 	 *
 	 * @return bool True if the model existed, false otherwise.
 	 */
-	protected function deleteSingle( string $class, int | string $id ): bool {
+	protected function deleteSingle( string $class, int|string $id ): bool {
 		$query = vsprintf( 'DELETE FROM %s WHERE %s = ?', [
 			$this->name( $this->getTableName( $class ) ),
 			$this->name( $class::idProperty() ),
@@ -807,7 +815,7 @@ abstract class SqlStore implements StoreInterface {
 			$result[ $name ] = [
 				'name'     => $name,
 				'type'     => $column['Type'],
-				'required' => $column['Null'] === 'NO',
+				'required' => $column['Null'] === 'NO', // phpcs:ignore
 				'default'  => $default,
 			];
 		}
@@ -826,7 +834,7 @@ abstract class SqlStore implements StoreInterface {
 		$properties = $class::properties();
 		$properties = array_filter( $properties, [ $this, 'isColumn' ] );
 
-		return array_map( function( Property | array $property ) use ( $class ): array {
+		return array_map( function ( Property|array $property ) use ( $class ): array {
 			$id      = $property[ PropertyItem::ID ];
 			$type    = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
 			$default = $property[ PropertyItem::DEFAULT ] ?? null;
@@ -859,7 +867,7 @@ abstract class SqlStore implements StoreInterface {
 	 *
 	 * @return string The column data type.
 	 */
-	protected function getColumnType( Property | array $property ): string {
+	protected function getColumnType( Property|array $property ): string {
 		$type = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
 
 		switch ( $type ) {
@@ -1171,11 +1179,12 @@ abstract class SqlStore implements StoreInterface {
 	/**
 	 * Alters foreign keys to fit the given model.
 	 *
-	 * @param class-string<ModelInterface> $class The model alter foreign keys for.
+	 * @param class-string<ModelInterface> $class The model to alter foreign keys for.
+	 * @param bool $create Whether to create foreign keys (true) or not (false).
 	 *
 	 * @return bool True if any foreign keys were altered, false otherwise.
 	 */
-	protected function alterForeign( string $class, $create = true ): bool {
+	protected function alterForeign( string $class, bool $create = true ): bool {
 		$count = 0;
 
 		foreach ( $this->alterForeignQuery( $class ) as $type => $query ) {
@@ -1340,6 +1349,11 @@ abstract class SqlStore implements StoreInterface {
 		return str_replace( '\\', '_', $class );
 	}
 
+	/**
+	 * Gets a prepared query statement.
+	 *
+	 * @param string $query The query to get the prepared query statement for.
+	 */
 	protected function getPreparedQuery( string $query ): object {
 		$hash = md5( $query );
 
@@ -1350,7 +1364,14 @@ abstract class SqlStore implements StoreInterface {
 		return $this->prepared[ $hash ] = $this->prepare( $query );
 	}
 
-	protected function isColumn( Property | array $property ): bool {
+	/**
+	 * Checks if a model property should be stored in a table column.
+	 *
+	 * @param Property|array $property The model property.
+	 *
+	 * @return bool
+	 */
+	protected function isColumn( Property|array $property ): bool {
 		return empty( $property[ PropertyType::FUNCTION ] ?? false );
 	}
 
@@ -1372,7 +1393,7 @@ abstract class SqlStore implements StoreInterface {
 	 *
 	 * @return bool
 	 */
-	protected function needsForeignKey( Property | array $property ): bool {
+	protected function needsForeignKey( Property|array $property ): bool {
 		$type = $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED;
 
 		if ( PropertyType::ARRAY !== $type && empty( $property[ PropertyItem::MATCH ] ) ) {

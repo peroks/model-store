@@ -5,8 +5,6 @@
  * @author Per Egil Roksvaag
  * @copyright Per Egil Roksvaag
  * @license MIT
- *
- * @noinspection PhpComposerExtensionStubsInspection, SqlDialectInspection
  */
 
 declare( strict_types = 1 );
@@ -17,6 +15,9 @@ use Peroks\Model\PropertyItem;
 use Peroks\Model\PropertyType;
 use Peroks\Model\Utils;
 
+/**
+ * Class for storing and retrieving models from a SQL database.
+ */
 abstract class SqlJsonStore extends SqlStore implements StoreInterface {
 
 	/**
@@ -40,6 +41,7 @@ abstract class SqlJsonStore extends SqlStore implements StoreInterface {
 	 * @param array $filter Key/value pairs to match model property values.
 	 *
 	 * @return ModelInterface[] An array of models.
+	 * @Squiz.Commenting.FunctionComment.IncorrectTypeHint
 	 */
 	public function filter( string $class, array $filter = [] ): array {
 		if ( empty( $filter ) ) {
@@ -53,7 +55,7 @@ abstract class SqlJsonStore extends SqlStore implements StoreInterface {
 		$rest_filter   = array_diff_key( $json_filter, $scalar_filter );
 		$values        = [];
 
-		$sql = array_map( function( string $key, mixed $value ) use ( &$values ): string {
+		$sql = array_map( function ( string $key, mixed $value ) use ( &$values ): string {
 			if ( is_array( $value ) ) {
 				$values = array_merge( $values, $value );
 				$fill   = join( ', ', array_fill( 0, count( $value ), '?' ) );
@@ -100,7 +102,7 @@ abstract class SqlJsonStore extends SqlStore implements StoreInterface {
 		$prepared = $this->getPreparedQuery( $query );
 		$rows     = $this->select( $prepared, $values );
 
-		return array_map( function( array $row ) use ( $class ): ModelInterface {
+		return array_map( function ( array $row ) use ( $class ): ModelInterface {
 			return $this->join( $class, $row );
 		}, $rows );
 	}
@@ -133,7 +135,12 @@ abstract class SqlJsonStore extends SqlStore implements StoreInterface {
 	 * Helpers
 	 * ---------------------------------------------------------------------- */
 
-	protected function isColumn( Property | array $property ): bool {
+	/**
+	 * Checks if model property is a table column.
+	 *
+	 * @param Property|array $property The model property.
+	 */
+	protected function isColumn( Property|array $property ): bool {
 		$index = ( $property[ PropertyItem::PRIMARY ] ?? false )
 			|| ( $property[ PropertyItem::UNIQUE ] ?? '' )
 			|| ( $property[ PropertyItem::INDEX ] ?? '' )

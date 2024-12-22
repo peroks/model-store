@@ -64,7 +64,7 @@ trait MysqlTrait {
 	/**
 	 * Executes a single query and returns the result.
 	 *
-	 * @param string $query A query statement.
+	 * @param string $query A query string.
 	 * @param array $values The values of a prepared query statement.
 	 *
 	 * @return array[] The query result.
@@ -174,7 +174,9 @@ trait MysqlTrait {
 	}
 
 	/**
-	 * @param string $query
+	 * Executes multiple queries and returns the result.
+	 *
+	 * @param string $query A query string with one or more queries.
 	 *
 	 * @return Generator
 	 */
@@ -189,7 +191,14 @@ trait MysqlTrait {
 		} while ( $this->db->next_result() );
 	}
 
-	protected function fetch( object $result ): ?array {
+	/**
+	 * Fetch the next row of a result set as an associative array.
+	 *
+	 * @param object $result A mysqli_result instance.
+	 *
+	 * @return array|null
+	 */
+	protected function fetch( object $result ): array|null {
 		return $result->fetch_assoc() ?: null;
 	}
 
