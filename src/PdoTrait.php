@@ -12,7 +12,7 @@
 declare( strict_types = 1 );
 namespace Peroks\Model\Store;
 
-use PDO, PDOException, PDOStatement;
+use PDO, PDOStatement;
 
 /**
  * PDO abstraction layer for storing and retrieving models.

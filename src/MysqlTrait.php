@@ -13,7 +13,7 @@ declare( strict_types = 1 );
 namespace Peroks\Model\Store;
 
 use Generator;
-use mysqli, mysqli_sql_exception;
+use mysqli;
 
 /**
  * Mysql abstraction layer for storing and retrieving models.

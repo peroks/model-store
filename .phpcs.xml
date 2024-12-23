@@ -8,7 +8,7 @@
 	<arg name="extensions" value="php" />
 
 	<!-- PHP version -->
-	<config name="testVersion" value="8.2"/>
+	<config name="testVersion" value="8.0-"/>
 
 	<!-- Exclude files -->
 	<exclude-pattern>/build/</exclude-pattern>
@@ -27,10 +27,11 @@
 		<exclude name="Squiz.Commenting.FunctionComment.EmptyThrows"/>
 		<exclude name="Squiz.Commenting.FunctionComment.IncorrectTypeHint"/>
 		<exclude name="Squiz.Commenting.FunctionComment.SpacingAfterParamType"/>
+		<exclude name="Squiz.ControlStructures.ControlSignature.SpaceAfterCloseBrace"/>
 		<exclude name="Squiz.PHP.DisallowMultipleAssignments.Found"/>
 		<exclude name="Squiz.PHP.DisallowMultipleAssignments.FoundInControlStructure"/>
 		<exclude name="Universal.Arrays.DisallowShortArraySyntax.Found"/>
-		<exclude name="Universal.NamingConventions.NoReservedKeywordParameterNames.classFound"/>
+		<exclude name="Universal.NamingConventions.NoReservedKeywordParameterNames"/>
 		<exclude name="Universal.Operators.DisallowShortTernary.Found"/>
 		<exclude name="WordPress.DB.RestrictedFunctions.mysql_mysqli_report"/>
 		<exclude name="WordPress.Files.FileName.InvalidClassFileName"/>
@@ -40,13 +41,8 @@
 		<exclude name="WordPress.NamingConventions.ValidVariableName.PropertyNotSnakeCase"/>
 		<exclude name="WordPress.NamingConventions.ValidVariableName.VariableNotSnakeCase"/>
 		<exclude name="WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase"/>
+		<exclude name="WordPress.Security.EscapeOutput.ExceptionNotEscaped"/>
 		<exclude name="WordPress.WP.AlternativeFunctions"/>
-	</rule>
-
-	<rule ref="WordPress.NamingConventions.ValidHookName">
-		<properties>
-			<property name="additionalWordDelimiters" value="/"/>
-		</properties>
 	</rule>
 
 	<rule ref="Generic.Arrays.DisallowLongArraySyntax.Found"/>

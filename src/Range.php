@@ -18,12 +18,12 @@ class Range {
 	/**
 	 * @var string|int The start of the range.
 	 */
-	public readonly string|int $from;
+	public string|int $from;
 
 	/**
 	 * @var string|int The end of the range.
 	 */
-	public readonly string|int $to;
+	public string|int $to;
 
 	/**
 	 * Constructor.

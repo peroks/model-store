@@ -4,21 +4,22 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "0acf8082725a09671db0a2ace12f73a8",
+    "content-hash": "932a72791cc5815a586fd45ac198ae94",
     "packages": [
         {
             "name": "peroks/model",
-            "version": "1.0.0",
+            "version": "2.0.0",
             "dist": {
                 "type": "path",
                 "url": "../model",
-                "reference": "8a524d29477c311aa17e72612d3ff399f7e422b7"
+                "reference": "748076be01280040f675441ae842a670fbf6ce85"
             },
             "require": {
-                "php": "^8.1"
+                "php": ">=8.0"
             },
             "require-dev": {
-                "phpunit/phpunit": "^10"
+                "ergebnis/composer-normalize": "^2.45.0",
+                "wp-coding-standards/wpcs": "^3.1.0"
             },
             "suggest": {
                 "peroks/model-store": "Permanent data store for models"
@@ -30,8 +31,20 @@
                 }
             },
             "scripts": {
-                "model-test": [
-                    "./vendor/bin/phpunit tests"
+                "build": [
+                    "@composer install"
+                ],
+                "build-for-deploy": [
+                    "@composer install --no-dev"
+                ],
+                "format": [
+                    "./vendor/bin/phpcbf ./src"
+                ],
+                "lint": [
+                    "./vendor/bin/phpcs ./src"
+                ],
+                "normalize": [
+                    "@composer normalize"
                 ]
             },
             "license": [
@@ -1216,11 +1229,8 @@
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {
-        "php": "^8.2"
+        "php": ">=8.0"
     },
     "platform-dev": [],
-    "platform-overrides": {
-        "php": "8.2"
-    },
     "plugin-api-version": "2.6.0"
 }

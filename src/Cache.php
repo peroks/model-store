@@ -27,7 +27,7 @@ class Cache implements StoreInterface {
 	/**
 	 * @var StoreInterface The actual data store containing the models.
 	 */
-	public readonly StoreInterface $store;
+	public StoreInterface $store;
 
 	/**
 	 * @var array The internal cache.
