@@ -288,6 +288,20 @@ class FileStore implements StoreInterface {
 	 * ---------------------------------------------------------------------- */
 
 	/**
+	 * Gets information about the model store.
+	 *
+	 * @param string $name The property name to get information about.
+	 */
+	public function info( string $name ): mixed {
+		return match ( $name ) {
+			'type'      => 'file',
+			'ready'     => true,
+			'connected' => true,
+			default     => null
+		};
+	}
+
+	/**
 	 * Builds a data store if necessary.
 	 *
 	 * @param array $models The models to add to the data store.

@@ -8,7 +8,7 @@
 	<arg name="extensions" value="php" />
 
 	<!-- PHP version -->
-	<config name="testVersion" value="8.0-"/>
+	<config name="testVersion" value="8.1-"/>
 
 	<!-- Exclude files -->
 	<exclude-pattern>/build/</exclude-pattern>

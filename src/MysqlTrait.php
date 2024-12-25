@@ -14,6 +14,7 @@ namespace Peroks\Model\Store;
 
 use Generator;
 use mysqli;
+use mysqli_sql_exception;
 
 /**
  * Mysql abstraction layer for storing and retrieving models.
@@ -23,11 +24,26 @@ trait MysqlTrait {
 	/**
 	 * @var object<mysqli> $db The database object.
 	 */
-	protected object $db;
+	public readonly object $db;
 
 	/* -------------------------------------------------------------------------
 	 * Database abstraction layer
 	 * ---------------------------------------------------------------------- */
+
+	/**
+	 * Gets information about the model store.
+	 *
+	 * @param string $name The property name to get information about.
+	 */
+	public function info( string $name ): mixed {
+		return match ( $name ) {
+			'type'      => 'mysqli',
+			'ready'     => $this->connected,
+			'connected' => $this->connected,
+			'dbname'    => $this->dbname,
+			default     => null
+		};
+	}
 
 	/**
 	 * Creates a database connection.
@@ -42,8 +58,19 @@ trait MysqlTrait {
 		$db = new mysqli( $connect->host, $connect->user, $connect->pass );
 		$db->set_charset( 'utf8mb4' );
 
+		// Select database.
 		if ( ! empty( $connect->name ) ) {
-			$db->select_db( $connect->name );
+			try {
+				$db->select_db( $connect->name );
+				$this->connected = true;
+			} catch ( mysqli_sql_exception ) { // phpcs:ignore
+			}
+		}
+
+		// Get the current database name.
+		if ( empty( $this->connected ) && $db->real_query( 'SELECT database()' ) ) {
+			$result       = $db->use_result()->fetch_all();
+			$this->dbname = $result[0][0] ?? null;
 		}
 
 		return $db;

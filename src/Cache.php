@@ -23,6 +23,10 @@ namespace Peroks\Model\Store;
  * Store Cache.
  */
 class Cache implements StoreInterface {
+	/**
+	 * @var string Hash separator.
+	 */
+	public const SEPARATOR = '|';
 
 	/**
 	 * @var StoreInterface The actual data store containing the models.
@@ -30,9 +34,14 @@ class Cache implements StoreInterface {
 	public StoreInterface $store;
 
 	/**
-	 * @var array The internal cache.
+	 * @var array[] The internal cache.
 	 */
 	protected array $cache = [];
+
+	/**
+	 * @var array[] Cached model ids from method calls.
+	 */
+	protected array $hash = [];
 
 	/**
 	 * Constructor
@@ -56,7 +65,10 @@ class Cache implements StoreInterface {
 	 * @return bool True if the model exists, false otherwise.
 	 */
 	public function has( string $class, int|string $id ): bool {
-		return $this->store->has( $class, $id );
+		if ( isset( $this->cache[ $class ][ $id ] ) ) {
+			return true;
+		}
+		return (bool) $this->setCache( $this->store->get( $class, $id ) );
 	}
 
 	/**
@@ -83,7 +95,35 @@ class Cache implements StoreInterface {
 	 * @return ModelInterface[] An array of matching models.
 	 */
 	public function list( string $class, array $ids = [] ): array {
-		return array_map( [ $this, 'setCache' ], $this->store->list( $class, $ids ) );
+		sort( $ids );
+		$parts  = array_merge( [ 'list', $class ], array_values( $ids ) );
+		$hash   = md5( join( static::SEPARATOR, $parts ) );
+		$hashed = $this->hash[ $hash ] ?? null;
+
+		if ( isset( $hashed ) && empty( $hashed ) ) {
+			return [];
+		}
+
+		if ( empty( $ids ) ) {
+			$ids = $hashed ?? [];
+		}
+
+		if ( $ids ) {
+			$cached = array_keys( $this->cache[ $class ] ?? [] );
+
+			if ( count( $ids ) === count( array_intersect( $ids, $cached ) ) ) {
+				$result = array_map( function ( int|string $id ) use ( $class ) {
+					return new $class( $this->cache[ $class ][ $id ] );
+				}, $ids );
+			}
+		}
+
+		if ( ! isset( $result ) ) {
+			$result = array_map( [ $this, 'setCache' ], $this->store->list( $class, $ids ) );
+		}
+
+		$this->hash[ $hash ] = array_keys( $result );
+		return $result;
 	}
 
 	/**
@@ -95,7 +135,28 @@ class Cache implements StoreInterface {
 	 * @return ModelInterface[] An array of models.
 	 */
 	public function filter( string $class, array $filter = [] ): array {
-		return array_map( [ $this, 'setCache' ], $this->store->filter( $class, $filter ) );
+		if ( empty( $filter ) ) {
+			return $this->list( $class );
+		}
+
+		ksort( $filter );
+		$parts  = array_merge( [ 'filter', $class ], array_keys( $filter ), array_values( $filter ) );
+		$hash   = md5( join( static::SEPARATOR, $parts ) );
+		$hashed = $this->hash[ $hash ] ?? null;
+		$ids    = $hashed ?? [];
+
+		if ( isset( $hashed ) && empty( $hashed ) ) {
+			return [];
+		}
+
+		if ( $ids ) {
+			return $this->list( $class, $ids );
+		}
+
+		$result = array_map( [ $this, 'setCache' ], $this->store->filter( $class, $filter ) );
+
+		$this->hash[ $hash ] = array_keys( $result );
+		return $result;
 	}
 
 	/* -------------------------------------------------------------------------
@@ -142,6 +203,15 @@ class Cache implements StoreInterface {
 	 * ---------------------------------------------------------------------- */
 
 	/**
+	 * Gets information about the model store.
+	 *
+	 * @param string $name The property name to get information about.
+	 */
+	public function info( string $name ): mixed {
+		return $this->store->info( $name );
+	}
+
+	/**
 	 * Builds a data store if necessary and clears the cache.
 	 *
 	 * @param array $models The models to add to the data store.
@@ -172,6 +242,7 @@ class Cache implements StoreInterface {
 	 */
 	public function clearCache(): void {
 		$this->cache = [];
+		$this->hash  = [];
 	}
 
 	/**

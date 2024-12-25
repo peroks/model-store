@@ -12,7 +12,6 @@
 declare( strict_types = 1 );
 namespace Peroks\Model\Store;
 
-use Exception;
 use Peroks\Model\ModelData;
 use Peroks\Model\Property;
 use Peroks\Model\PropertyItem;
@@ -28,12 +27,12 @@ abstract class SqlStore implements StoreInterface {
 	/**
 	 * @var object $db The database object.
 	 */
-	protected object $db;
+	public readonly object $db;
 
 	/**
-	 * @var string The database name for this store.
+	 * @var string|null The database name for this store.
 	 */
-	protected string $dbname;
+	protected string|null $dbname;
 
 	/**
 	 * @var array An array of prepared query statements.
@@ -41,27 +40,31 @@ abstract class SqlStore implements StoreInterface {
 	protected array $prepared = [];
 
 	/**
+	 * @var bool True if connected to the requested database, false otherwise.
+	 */
+	protected bool $connected = false;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param array|object $connect Connections parameters: host, user, pass, name, port, socket.
-	 * @param array<Model> $models An array of Model class names.
 	 */
-	public function __construct( array|object $connect, array $models ) {
+	public function __construct( array|object $connect ) {
 		$connect      = (object) $connect;
-		$this->dbname = $connect->name;
-
-		try {
-			$this->db = $this->connect( $connect );
-		} catch ( Exception $e ) {
-			unset( $connect->name );
-			$this->db = $this->connect( $connect );
-			$this->build( $models );
-		}
+		$this->dbname = $connect->name ?? null;
+		$this->db     = $this->connect( $connect );
 	}
 
 	/* -------------------------------------------------------------------------
 	 * Database abstraction layer
 	 * ---------------------------------------------------------------------- */
+
+	/**
+	 * Gets information about the model store.
+	 *
+	 * @param string $name The property name to get information about.
+	 */
+	abstract public function info( string $name ): mixed;
 
 	/**
 	 * Creates a database connection.
@@ -499,8 +502,10 @@ abstract class SqlStore implements StoreInterface {
 	 * @return bool
 	 */
 	public function build( array $models, array $options = [] ): bool {
-		$this->exec( $this->createDatabaseQuery( $this->dbname ) );
-		$this->exec( "USE {$this->dbname}" );
+		if ( $this->dbname ) {
+			$this->createDatabase( $this->dbname );
+			$this->exec( "USE {$this->dbname}" );
+		}
 
 		$models = $this->getAllModels( $models );
 		return (bool) $this->buildDatabase( $models );
@@ -1523,7 +1528,9 @@ abstract class SqlStore implements StoreInterface {
 		foreach ( $models as $class ) {
 			foreach ( $class::properties() as $property ) {
 				$foreign = $property[ PropertyItem::FOREIGN ] ?? null;
-				$model   = $property[ PropertyItem::MODEL ] ?? $foreign;
+
+				/** @var class-string<ModelInterface> $model */
+				$model = $property[ PropertyItem::MODEL ] ?? $foreign;
 
 				if ( Utils::isModel( $model ) && $model::idProperty() ) {
 					if ( empty( in_array( $model, $result, true ) ) ) {

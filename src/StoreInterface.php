@@ -91,6 +91,13 @@ interface StoreInterface {
 	 * ---------------------------------------------------------------------- */
 
 	/**
+	 * Gets information about the model store.
+	 *
+	 * @param string $name The property name to get information about.
+	 */
+	public function info( string $name ): mixed;
+
+	/**
 	 * Builds a data store if necessary.
 	 *
 	 * @param array $models The models to add to the data store.

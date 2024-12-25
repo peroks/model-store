@@ -12,7 +12,9 @@
 declare( strict_types = 1 );
 namespace Peroks\Model\Store;
 
-use PDO, PDOStatement;
+use PDO;
+use PDOException;
+use PDOStatement;
 
 /**
  * PDO abstraction layer for storing and retrieving models.
@@ -22,11 +24,26 @@ trait PdoTrait {
 	/**
 	 * @var object<PDO> $db The database object.
 	 */
-	protected object $db;
+	public readonly object $db;
 
 	/* -------------------------------------------------------------------------
 	 * Database abstraction layer
 	 * ---------------------------------------------------------------------- */
+
+	/**
+	 * Gets information about the model store.
+	 *
+	 * @param string $name The property name to get information about.
+	 */
+	public function info( string $name ): mixed {
+		return match ( $name ) {
+			'type'      => 'pdo',
+			'ready'     => $this->connected,
+			'connected' => $this->connected,
+			'dbname'    => $this->dbname,
+			default     => null
+		};
+	}
 
 	/**
 	 * Creates a database connection.
@@ -44,7 +61,18 @@ trait PdoTrait {
 		] );
 
 		if ( ! empty( $connect->name ) ) {
-			$db->exec( "USE {$connect->name}" );
+			try {
+				$db->exec( "USE {$connect->name}" );
+				$this->connected = true;
+			} catch ( PDOException ) { // phpcs:ignore
+			}
+		}
+
+		if ( empty( $this->connected ) ) {
+			if ( $statement = $db->query( 'SELECT database()', PDO::FETCH_NUM ) ) {
+				$result       = $statement->fetchAll();
+				$this->dbname = $result[0][0] ?? null;
+			}
 		}
 
 		return $db;
