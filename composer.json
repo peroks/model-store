@@ -21,7 +21,7 @@
 	],
 	"require": {
 		"php": ">=8.1",
-		"peroks/model": "^2.0.0"
+		"peroks/model": "^3.0"
 	},
 	"require-dev": {
 		"ergebnis/composer-normalize": "^2.45.0",
@@ -31,14 +31,6 @@
 		"ext-intl": "*",
 		"ext-mysqli": "Required for native MySQL model stores",
 		"ext-pdo": "Required for PDO model stores"
-	},
-	"repositories": {
-		"development": {
-			"type": "path",
-			"url": "../*",
-			"canonical": false,
-			"symlink": true
-		}
 	},
 	"minimum-stability": "stable",
 	"autoload": {
@@ -50,23 +42,19 @@
 		"allow-plugins": {
 			"dealerdirect/phpcodesniffer-composer-installer": true,
 			"ergebnis/composer-normalize": true
+		},
+		"platform": {
+			"php": "8.1"
 		}
 	},
 	"scripts": {
-		"build": [
-			"@composer install"
-		],
-		"build-for-deploy": [
-			"@composer install --no-dev"
-		],
-		"format": [
-			"./vendor/bin/phpcbf ./src"
-		],
-		"lint": [
-			"./vendor/bin/phpcs ./src"
-		],
-		"normalize": [
-			"@composer normalize"
-		]
+		"build-deploy": "@composer install --no-dev",
+		"build-install": "@composer install",
+		"build-lock": "@composer update --with-all-dependencies --no-install",
+		"build-normalize": "@composer normalize",
+		"build-update": "@composer update --with-all-dependencies",
+		"clean": "rm -rf ./vendor",
+		"format": "./vendor/bin/phpcbf ./src",
+		"lint": "./vendor/bin/phpcs ./src"
 	}
 }

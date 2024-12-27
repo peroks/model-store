@@ -10,6 +10,7 @@
 declare( strict_types = 1 );
 namespace Peroks\Model\Store;
 
+use Peroks\Model\ModelException;
 use Peroks\Model\PropertyItem;
 use Peroks\Model\PropertyType;
 
@@ -189,6 +190,7 @@ class FileStore implements StoreInterface {
 	 * @param ModelInterface $model The model to store.
 	 *
 	 * @return ModelInterface The stored model.
+	 * @throws ModelException
 	 */
 	public function set( ModelInterface $model ): ModelInterface {
 		$id    = $model->id();
@@ -251,6 +253,9 @@ class FileStore implements StoreInterface {
 	 * Splits a model into separate sub-models and stores them.
 	 *
 	 * @param ModelInterface $model The model to split.
+	 *
+	 * @return array
+	 * @throws ModelException
 	 */
 	protected function split( ModelInterface $model ): array {
 		$properties = $model::properties();
@@ -351,6 +356,8 @@ class FileStore implements StoreInterface {
 	 * Imports data from a source.
 	 *
 	 * @param FileStore|array|string $source The source containing the data to import.
+	 *
+	 * @throws ModelException
 	 */
 	public function import( mixed $source ): void {
 		if ( is_array( $source ) ) {

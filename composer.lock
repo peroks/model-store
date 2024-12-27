@@ -4,15 +4,21 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "932a72791cc5815a586fd45ac198ae94",
+    "content-hash": "8782f00bc5798a62b35a7f0317ae6a5e",
     "packages": [
         {
             "name": "peroks/model",
-            "version": "2.0.0",
+            "version": "3.0.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/peroks/model.git",
+                "reference": "50aee83e7b9ac35b755b72cf3c993e6ea12f8d38"
+            },
             "dist": {
-                "type": "path",
-                "url": "../model",
-                "reference": "ac7de3f8bb5d3eebe61715c28aa61b23295525d1"
+                "type": "zip",
+                "url": "https://api.github.com/repos/peroks/model/zipball/50aee83e7b9ac35b755b72cf3c993e6ea12f8d38",
+                "reference": "50aee83e7b9ac35b755b72cf3c993e6ea12f8d38",
+                "shasum": ""
             },
             "require": {
                 "php": ">=8.0"
@@ -30,23 +36,7 @@
                     "Peroks\\Model\\": "src/"
                 }
             },
-            "scripts": {
-                "build": [
-                    "@composer install"
-                ],
-                "build-for-deploy": [
-                    "@composer install --no-dev"
-                ],
-                "format": [
-                    "./vendor/bin/phpcbf ./src"
-                ],
-                "lint": [
-                    "./vendor/bin/phpcs ./src"
-                ],
-                "normalize": [
-                    "@composer normalize"
-                ]
-            },
+            "notification-url": "https://packagist.org/downloads/",
             "license": [
                 "MIT"
             ],
@@ -63,9 +53,11 @@
                 "json",
                 "rest-api"
             ],
-            "transport-options": {
-                "relative": true
-            }
+            "support": {
+                "issues": "https://github.com/peroks/model/issues",
+                "source": "https://github.com/peroks/model/tree/3.0.0"
+            },
+            "time": "2024-12-27T12:29:54+00:00"
         }
     ],
     "packages-dev": [
@@ -1229,8 +1221,11 @@
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {
-        "php": ">=8.0"
+        "php": ">=8.1"
     },
     "platform-dev": [],
+    "platform-overrides": {
+        "php": "8.1"
+    },
     "plugin-api-version": "2.6.0"
 }
