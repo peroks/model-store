@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "8782f00bc5798a62b35a7f0317ae6a5e",
+    "content-hash": "bddc0e7d2aad5d68e86d1c88d83e3b22",
     "packages": [
         {
             "name": "peroks/model",
