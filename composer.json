@@ -3,7 +3,7 @@
 	"description": "Model Store: Permanent data store for models.",
 	"license": "MIT",
 	"type": "library",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"keywords": [
 		"json",
 		"database",
