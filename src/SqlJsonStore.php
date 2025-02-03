@@ -138,16 +138,26 @@ abstract class SqlJsonStore extends SqlStore implements StoreInterface {
 	/**
 	 * Checks if model property is a table column.
 	 *
+	 * Only properties which needs indexing get their own column.
+	 * All other properties are stored as JSON
+	 *
 	 * @param Property|array $property The model property.
 	 */
 	protected function isColumn( Property|array $property ): bool {
-		$index = ( $property[ PropertyItem::PRIMARY ] ?? false )
+		return $this->needsIndexing( $property ) && parent::isColumn( $property );
+	}
+
+	/**
+	 * Checks if a model property needs indexing.
+	 *
+	 * @param Property|array $property The model property.
+	 */
+	protected function needsIndexing( Property|array $property ): bool {
+		return ( $property[ PropertyItem::PRIMARY ] ?? false )
 			|| ( $property[ PropertyItem::UNIQUE ] ?? '' )
 			|| ( $property[ PropertyItem::INDEX ] ?? '' )
 			|| ( $property[ PropertyItem::FOREIGN ] ?? '' )
 			|| $this->needsForeignKey( $property );
-
-		return $index && parent::isColumn( $property );
 	}
 
 	/**
@@ -224,7 +234,7 @@ abstract class SqlJsonStore extends SqlStore implements StoreInterface {
 				if ( $class::idProperty() ) {
 					$value = match ( $property[ PropertyItem::TYPE ] ?? PropertyType::MIXED ) {
 						PropertyType::OBJECT => $this->setSingle( $value )->id(),
-						PropertyType::ARRAY  => array_map( fn( $item ) => $item->id(), $this->setMulti( $value ) ),
+						PropertyType::ARRAY  => array_map( fn( $item ) => $item->id(), $this->setMulti( $class, $value ) ),
 					};
 				}
 			}
@@ -235,6 +245,13 @@ abstract class SqlJsonStore extends SqlStore implements StoreInterface {
 		$json       = Utils::encode( $result );
 		$properties = array_filter( $properties, [ $this, 'isColumn' ] );
 		$result     = array_intersect_key( $result, $properties );
+
+		// Transform values for json columns.
+		foreach ( $properties as $id => $property ) {
+			if ( $this->getColumnType( $property ) === 'json' ) {
+				$result[ $id ] = Utils::encode( $result[ $id ] );
+			}
+		}
 
 		$result[ $this->modelColumn ] = $json;
 		return $result;

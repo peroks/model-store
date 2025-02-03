@@ -398,23 +398,23 @@ abstract class SqlStore implements StoreInterface {
 	 * @return ModelInterface The stored model.
 	 */
 	protected function setSingle( ModelInterface $model ): ModelInterface {
-		$this->setMulti( [ $model ] );
+		$this->setMulti( $model::class, [ $model ] );
 		return $model;
 	}
 
 	/**
 	 * Stores an array of models.
 	 *
+	 * @param class-string<ModelInterface> $class The model class name.
 	 * @param ModelInterface[] $models An array of model to store.
 	 *
 	 * @return ModelInterface[]
 	 */
-	protected function setMulti( array $models ): array {
-		if ( empty( $model = current( $models ) ) ) {
+	protected function setMulti( string $class, array $models ): array {
+		if ( empty( $models ) ) {
 			return $models;
 		}
 
-		$class   = $model::class;
 		$columns = $this->getRowColumns( $class );
 		$columns = array_map( [ $this, 'name' ], $columns );
 		$values  = [];
@@ -1497,7 +1497,7 @@ abstract class SqlStore implements StoreInterface {
 			if ( PropertyType::ARRAY === $type ) {
 				if ( $child ) {
 					if ( $child::idProperty() ) {
-						$this->setMulti( $value );
+						$this->setMulti( $child, $value );
 						$callback = fn( $item ) => $item->id();
 					} else {
 						$callback = fn( $item ) => $item->data( ModelData::COMPACT );

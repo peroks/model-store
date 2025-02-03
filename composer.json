@@ -48,10 +48,11 @@
 		}
 	},
 	"scripts": {
+		"post-install-cmd": "@composer normalize",
+		"post-update-cmd": "@composer normalize",
 		"build-deploy": "@composer install --no-dev",
 		"build-install": "@composer install",
 		"build-lock": "@composer update --with-all-dependencies --no-install",
-		"build-normalize": "@composer normalize",
 		"build-update": "@composer update --with-all-dependencies",
 		"clean": "rm -rf ./vendor",
 		"format": "./vendor/bin/phpcbf ./src",
