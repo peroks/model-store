@@ -3,7 +3,6 @@
 	"description": "Model Store: Permanent data store for models.",
 	"license": "MIT",
 	"type": "library",
-	"version": "1.0.2",
 	"keywords": [
 		"json",
 		"database",
@@ -21,7 +20,7 @@
 	],
 	"require": {
 		"php": ">=8.1",
-		"peroks/model": "^3.0"
+		"peroks/model": "^3.0.2"
 	},
 	"require-dev": {
 		"ergebnis/composer-normalize": "^2.45.0",
